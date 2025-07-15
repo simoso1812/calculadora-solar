@@ -1,0 +1,5 @@
+streamlit
+numpy
+numpy_financial
+fpdf2
+matplotlib
