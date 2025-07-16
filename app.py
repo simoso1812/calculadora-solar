@@ -63,6 +63,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     life = 25
     if clima.strip().upper() == "NUBE": n -= 0.05
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
+    potencia_efectiva_calculo = min(size, potencia_ac_inversor)               
     costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
     valor_proyecto_total = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_total *= 1.03
@@ -76,7 +77,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
     cashflow_free, total_lifetime_generation, total_maintenance_cost_present_value = [], 0, 0
     ahorro_anual_año1 = 0
-    annual_generation_init = potencia_ac_inversor * HSP * n * 365
+    annual_generation_init = potencia_efectiva_calculo * HSP * n * 365
     performance = [0.083, 0.080, 0.081, 0.084, 0.083, 0.080, 0.093, 0.091, 0.084, 0.084, 0.079, 0.079]
     for i in range(life):
         current_annual_generation = annual_generation_init * ((1 - tasa_degradacion) ** i)
