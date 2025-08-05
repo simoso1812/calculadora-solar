@@ -356,6 +356,40 @@ def main():
             col2.metric("TIR", f"{tasa_interna:.2%}")
             col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
             col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
+            # --- SECCIÓN DE ANÁLISIS FINANCIERO INTERNO (DETALLADO Y REDONDEADO) ---
+            with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
+                st.subheader("Desglose Basado en Promedios Históricos")
+                
+                # Usamos los promedios para calcular el presupuesto guía detallado
+                presupuesto_equipos = valor_proyecto_total * (PROMEDIOS_COSTO['Equipos'] / 100)
+                presupuesto_materiales = valor_proyecto_total * (PROMEDIOS_COSTO['Materiales'] / 100)
+                provision_iva_guia = valor_proyecto_total * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
+                ganancia_estimada_guia = valor_proyecto_total * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
+                
+                st.info(f"""
+                Basado en el **Valor Total del Proyecto de ${valor_proyecto_total:,.0f} COP**, el presupuesto guía según tu historial es:
+                """)
+
+                col_guia1, col_guia2, col_guia3, col_guia4 = st.columns(4)
+                col_guia1.metric(
+                    label=f"Equipos ({PROMEDIOS_COSTO['Equipos']:.2f}%)",
+                    value=f"${math.ceil(presupuesto_equipos):,.0f}"
+                )
+                col_guia2.metric(
+                    label=f"Materiales ({PROMEDIOS_COSTO['Materiales']:.2f}%)",
+                    value=f"${math.ceil(presupuesto_materiales):,.0f}"
+                )
+                col_guia3.metric(
+                    label=f"Provisión IVA ({PROMEDIOS_COSTO['IVA (Impuestos)']:.2f}%)",
+                    value=f"${math.ceil(provision_iva_guia):,.0f}"
+                )
+                col_guia4.metric(
+                    label=f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)",
+                    value=f"${math.ceil(ganancia_estimada_guia):,.0f}"
+                )
+                
+                st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
+
             
             st.header("Análisis Gráfico")
             fig1, ax1 = plt.subplots(figsize=(10, 5))
@@ -425,6 +459,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
