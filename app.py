@@ -11,10 +11,18 @@ import io
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
-
+import math
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
+# Reemplaza el diccionario PROMEDIOS_COSTO en tu app.py con este
+
+PROMEDIOS_COSTO = {
+    'Equipos': 24.33,
+    'Materiales': 16.67,
+    'IVA (Impuestos)': 11.50,
+    'Margen (Ganancia)': 16.38
+}
 
 ESTRUCTURA_CARPETAS = {
     "00_Contacto_y_Venta": {},
@@ -83,13 +91,15 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
     valor_proyecto_total = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_total *= 1.03
-    valor_proyecto_total = round(valor_proyecto_total, 2)
+    valor_proyecto_total = math.ceil(valor_proyecto_total)
     monto_a_financiar = valor_proyecto_total * (perc_financiamiento / 100)
+    monto_a_financiar = math.ceil(monto_a_financiar)              
     cuota_mensual_credito = 0
     if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_credito > 0:
         tasa_mensual_credito = tasa_interes_credito / 12
         num_pagos_credito = plazo_credito_años * 12
         cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
+        cuota_mensual_credito = math.ceil(cuota_mensual_credito)
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
     cashflow_free, total_lifetime_generation, ahorro_anual_año1 = [], 0, 0
     annual_generation_init = potencia_efectiva_calculo * HSP * n * 365
@@ -415,6 +425,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
