@@ -195,6 +195,8 @@ def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id
 
 # Reemplaza esta función en tu app.py
 
+# Reemplaza esta función en tu app.py
+
 def obtener_siguiente_consecutivo(service, id_carpeta_padre):
     """
     Busca en Google Drive el último número de proyecto para el año actual 
@@ -213,6 +215,13 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
         
         items = results.get('files', [])
         
+        # =================================================================
+        # LÍNEAS DE DEPURACIÓN: Mostramos la respuesta de la API en la app
+        # =================================================================
+        st.write("Respuesta de la API de Drive (lista de carpetas encontradas):")
+        st.json(items)
+        # =================================================================
+
         max_num = 0
         patron = re.compile(f"FV{año_actual_corto}(\\d{{3}})")
 
@@ -227,12 +236,8 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
         return max_num + 1
 
     except Exception as e:
-        # =================================================================
-        # CAMBIO CLAVE: Usamos st.error para que el error sea visible
-        # en la interfaz de la aplicación.
-        # =================================================================
         st.error(f"Error al buscar consecutivo en Drive: {e}")
-        return 1 # Mantenemos 1 como valor de respaldo
+        return 1
 # ==============================================================================
 # 2. INTERFAZ DE STREAMLIT
 # ==============================================================================
@@ -437,6 +442,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
