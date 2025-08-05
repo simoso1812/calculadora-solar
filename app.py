@@ -197,83 +197,6 @@ class PropuestaPDF(FPDF):
         self.crear_detalle_sistema()
         return bytes(self.output(dest='S'))
 
-
-# Añade esta nueva función a tu app.py
-
-def crear_subcarpetas(service, id_carpeta_padre, estructura):
-    """
-    Función recursiva para crear una estructura de carpetas anidadas en Google Drive.
-    """
-    for nombre_carpeta, sub_estructura in estructura.items():
-        # Metadata para la nueva subcarpeta
-        file_metadata = {
-            'name': nombre_carpeta,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [id_carpeta_padre]
-        }
-        # Crear la subcarpeta
-        subfolder = service.files().create(
-            body=file_metadata,
-            fields='id',
-            supportsAllDrives=True
-        ).execute()
-        
-        # Si esta subcarpeta tiene más carpetas adentro, llamarse a sí misma (recursividad)
-        if sub_estructura:
-            crear_subcarpetas(service, subfolder.get('id'), sub_estructura)
-
-# Reemplaza tu función crear_carpeta_proyecto_en_drive actual con esta
-
-# Reemplaza la función crear_carpeta_proyecto_en_drive con esta versión
-
-def crear_carpeta_y_subir_pdf(nombre_proyecto, id_carpeta_padre, client_id, client_secret, refresh_token, pdf_bytes, nombre_pdf):
-    """
-    Crea la estructura de carpetas y sube el PDF a la subcarpeta correspondiente.
-    """
-    try:
-        creds = Credentials(
-            None, refresh_token=refresh_token,
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=client_id, client_secret=client_secret,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        service = build('drive', 'v3', credentials=creds)
-        
-        # 1. Crear la carpeta principal del proyecto
-        folder_metadata = {'name': nombre_proyecto, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [id_carpeta_padre]}
-        folder = service.files().create(body=folder_metadata, fields='id, webViewLink', supportsAllDrives=True).execute()
-        id_carpeta_principal_nueva = folder.get('id')
-        
-        if id_carpeta_principal_nueva:
-            # 2. Crear toda la estructura de subcarpetas
-            with st.spinner("Creando estructura de subcarpetas..."):
-                crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
-            st.success("✅ Estructura de carpetas creada.")
-
-            # 3. Buscar el ID de la subcarpeta "01_Propuesta_y_Contratacion"
-            with st.spinner("Buscando carpeta de destino para el PDF..."):
-                query = f"'{id_carpeta_principal_nueva}' in parents and name='01_Propuesta_y_Contratacion'"
-                results = service.files().list(q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-                items = results.get('files', [])
-            
-                if items:
-                    id_carpeta_propuesta = items[0].get('id')
-                    # 4. Subir el PDF a esa subcarpeta
-                    subir_pdf_a_drive(service, id_carpeta_propuesta, nombre_pdf, pdf_bytes)
-                else:
-                    st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
-
-        return folder.get('webViewLink')
-        
-    except Exception as e:
-        st.error(f"Error en el proceso de Google Drive: {e}")
-        return None
-
-
-# Reemplaza esta función en tu app.py con la versión final
-
-# Reemplaza esta función en tu app.py con la versión final
-
 def obtener_siguiente_consecutivo(service, id_carpeta_padre):
     """
     Busca en Google Drive el último número de proyecto para el año actual 
@@ -314,9 +237,6 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
         st.error(f"Error al buscar consecutivo en Drive: {e}")
         return 1
 
-
-# Añade esta nueva función a tu app.py
-
 def subir_pdf_a_drive(service, id_carpeta_destino, nombre_archivo, pdf_bytes):
     """Sube un archivo PDF en formato de bytes a una carpeta específica en Google Drive."""
     try:
@@ -325,19 +245,63 @@ def subir_pdf_a_drive(service, id_carpeta_destino, nombre_archivo, pdf_bytes):
             'parents': [id_carpeta_destino]
         }
         media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
-        
         file = service.files().create(
             body=file_metadata,
             media_body=media,
             fields='id, webViewLink',
             supportsAllDrives=True
         ).execute()
-        
         st.info(f"📄 PDF guardado en la carpeta 'Propuesta y Contratación'.")
         return file.get('webViewLink')
-
     except Exception as e:
         st.error(f"Error al subir el PDF a Google Drive: {e}")
+        return None
+
+def crear_subcarpetas(service, id_carpeta_padre, estructura):
+    """Función recursiva para crear una estructura de carpetas anidadas en Google Drive."""
+    for nombre_carpeta, sub_estructura in estructura.items():
+        file_metadata = {
+            'name': nombre_carpeta,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [id_carpeta_padre]
+        }
+        subfolder = service.files().create(
+            body=file_metadata,
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+        if sub_estructura:
+            crear_subcarpetas(service, subfolder.get('id'), sub_estructura)
+def crear_carpeta_proyecto_en_drive(service, nombre_proyecto, id_carpeta_padre, pdf_bytes, nombre_pdf):
+    """Crea la carpeta principal del proyecto, toda su estructura y sube el PDF."""
+    try:
+        # 1. Crear la carpeta principal del proyecto
+        folder_metadata = {'name': nombre_proyecto, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [id_carpeta_padre]}
+        folder = service.files().create(body=folder_metadata, fields='id, webViewLink', supportsAllDrives=True).execute()
+        id_carpeta_principal_nueva = folder.get('id')
+        
+        if id_carpeta_principal_nueva:
+            # 2. Crear toda la estructura de subcarpetas
+            with st.spinner("Creando estructura de subcarpetas..."):
+                crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
+            st.success("✅ Estructura de carpetas creada.")
+
+            # 3. Buscar el ID de la subcarpeta de destino
+            with st.spinner("Buscando carpeta de destino para el PDF..."):
+                query = f"'{id_carpeta_principal_nueva}' in parents and name='01_Propuesta_y_Contratacion'"
+                results = service.files().list(q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+                items = results.get('files', [])
+            
+                if items:
+                    id_carpeta_propuesta = items[0].get('id')
+                    # 4. Subir el PDF a esa subcarpeta
+                    subir_pdf_a_drive(service, id_carpeta_propuesta, nombre_pdf, pdf_bytes)
+                else:
+                    st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
+
+        return folder.get('webViewLink')
+    except Exception as e:
+        st.error(f"Error en el proceso de Google Drive: {e}")
         return None
 # ==============================================================================
 # 2. INTERFAZ DE STREAMLIT
@@ -420,6 +384,14 @@ def main():
             perc_financiamiento, tasa_interes_input, plazo_credito_años = 0, 0, 0
 
     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
+        # Dentro del if st.button(...), la llamada debe ser a la función principal
+        link_carpeta = crear_carpeta_proyecto_en_drive(
+            drive_service, # El objeto de servicio que ya creamos
+            nombre_proyecto, 
+            parent_folder_id, 
+            pdf_bytes, 
+            nombre_pdf_final
+)
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
             # --- Lógica de cálculo y generación de nombres (sin cambios) ---
             año_actual = str(datetime.datetime.now().year)[-2:]
@@ -583,6 +555,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
