@@ -193,9 +193,8 @@ def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id
         st.error(f"Error al crear la carpeta en Google Drive: {e}")
         return None
 
-# Reemplaza esta función en tu app.py
 
-# Reemplaza esta función en tu app.py
+# Reemplaza esta función en tu app.py con la versión final
 
 def obtener_siguiente_consecutivo(service, id_carpeta_padre):
     """
@@ -210,18 +209,16 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
             q=query,
             pageSize=1000,
             fields="files(name)",
-            supportsAllDrives=True
+            supportsAllDrives=True,
+            # =================================================================
+            # PARÁMETRO CLAVE AÑADIDO: Incluye archivos de todas las unidades
+            # =================================================================
+            includeItemsFromAllDrives=True 
         ).execute()
         
+        # Eliminamos las líneas de depuración
         items = results.get('files', [])
         
-        # =================================================================
-        # LÍNEAS DE DEPURACIÓN: Mostramos la respuesta de la API en la app
-        # =================================================================
-        st.write("Respuesta de la API de Drive (lista de carpetas encontradas):")
-        st.json(items)
-        # =================================================================
-
         max_num = 0
         patron = re.compile(f"FV{año_actual_corto}(\\d{{3}})")
 
@@ -442,6 +439,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
