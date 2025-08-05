@@ -8,6 +8,7 @@ import json
 import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+import re
 
 # ==============================================================================
 # 1. COPIA Y PEGA AQUÍ TODAS TUS FUNCIONES
@@ -192,6 +193,40 @@ def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id
         st.error(f"Error al crear la carpeta en Google Drive: {e}")
         return None
 
+def obtener_siguiente_consecutivo(service, id_carpeta_padre):
+    """
+    Busca en Google Drive el último número de proyecto para el año actual 
+    y devuelve el siguiente número consecutivo.
+    """
+    try:
+        año_actual_corto = str(datetime.datetime.now().year)[-2:]
+        query = f"'{id_carpeta_padre}' in parents and mimeType='application/vnd.google-apps.folder'"
+        
+        results = service.files().list(
+            q=query,
+            pageSize=1000, # Aumenta si tienes más de 1000 proyectos al año
+            fields="files(name)",
+            supportsAllDrives=True
+        ).execute()
+        
+        items = results.get('files', [])
+        
+        max_num = 0
+        patron = re.compile(f"FV{año_actual_corto}(\\d{{3}})") # Busca el patrón FVYYNNN
+
+        if items:
+            for item in items:
+                match = patron.search(item['name'])
+                if match:
+                    numero = int(match.group(1))
+                    if numero > max_num:
+                        max_num = numero
+        
+        return max_num + 1
+
+    except Exception as e:
+        st.warning(f"No se pudo determinar el consecutivo automático. Usando '1'. Error: {e}")
+        return 1
 # ==============================================================================
 # 2. INTERFAZ DE STREAMLIT
 # ==============================================================================
@@ -200,12 +235,37 @@ def main():
     st.set_page_config(page_title="Calculadora Solar", layout="wide", initial_sidebar_state="expanded")
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
+
+    creds = None
+    try:
+        client_id = st.secrets["GOOGLE_CLIENT_ID"]
+        client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
+        refresh_token = st.secrets["GOOGLE_REFRESH_TOKEN"]
+        
+        creds = Credentials(
+            None, refresh_token=refresh_token,
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=client_id, client_secret=client_secret,
+            scopes=['https://www.googleapis.com/auth/drive']
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+        parent_folder_id = st.secrets["PARENT_FOLDER_ID"]
+        
+        # Obtenemos el siguiente número de proyecto automáticamente
+        numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
+
+    except Exception:
+        # Si los secretos no están configurados, la app aún funciona pero sin la parte de Drive
+        numero_proyecto_del_año = 1 
+
+    
     with st.sidebar:
         st.header("Parámetros de Entrada")
         st.subheader("Información del Proyecto")
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
-        numero_proyecto_del_año = st.number_input("Número de Proyecto del Año (ej: 1, 2, 3)", min_value=1, value=1, step=1)
+        st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
+    
         
         opcion = st.radio("Método para dimensionar el sistema:",
                           ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"],
@@ -371,3 +431,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
