@@ -193,6 +193,8 @@ def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id
         st.error(f"Error al crear la carpeta en Google Drive: {e}")
         return None
 
+# Reemplaza esta función en tu app.py
+
 def obtener_siguiente_consecutivo(service, id_carpeta_padre):
     """
     Busca en Google Drive el último número de proyecto para el año actual 
@@ -204,7 +206,7 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
         
         results = service.files().list(
             q=query,
-            pageSize=1000, # Aumenta si tienes más de 1000 proyectos al año
+            pageSize=1000,
             fields="files(name)",
             supportsAllDrives=True
         ).execute()
@@ -212,7 +214,7 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
         items = results.get('files', [])
         
         max_num = 0
-        patron = re.compile(f"FV{año_actual_corto}(\\d{{3}})") # Busca el patrón FVYYNNN
+        patron = re.compile(f"FV{año_actual_corto}(\\d{{3}})")
 
         if items:
             for item in items:
@@ -225,8 +227,12 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
         return max_num + 1
 
     except Exception as e:
-        st.warning(f"No se pudo determinar el consecutivo automático. Usando '1'. Error: {e}")
-        return 1
+        # =================================================================
+        # CAMBIO CLAVE: Usamos st.error para que el error sea visible
+        # en la interfaz de la aplicación.
+        # =================================================================
+        st.error(f"Error al buscar consecutivo en Drive: {e}")
+        return 1 # Mantenemos 1 como valor de respaldo
 # ==============================================================================
 # 2. INTERFAZ DE STREAMLIT
 # ==============================================================================
@@ -431,5 +437,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
