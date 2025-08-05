@@ -82,6 +82,10 @@ def recomendar_inversor(size_kwp):
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                tasa_degradacion=0, precio_excedentes=0):
+     # --- CÁLCULO DEL ÁREA REQUERIDA (NUEVO) ---
+    area_por_panel = 2.3 * 1.0  # Dimensiones de 2.3m x 1m
+    factor_seguridad = 1.20     # Se añade un 30% para mantenimiento y espacios
+    area_requerida = math.ceil(quantity * area_por_panel * factor_seguridad)
     # (El código de esta función no cambia, ya está correcta con la lógica de clipping)
     HSP = HSP_POR_CIUDAD.get(ciudad.upper(), 4.5)
     n = 0.85; life = 25
@@ -132,7 +136,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     return valor_proyecto_total, size, monto_a_financiar, cuota_mensual_credito, \
            desembolso_inicial_cliente, cashflow_free, trees, monthly_generation_init, \
            present_value, internal_rate, quantity, life, recomendacion_inversor_str, \
-           lcoe, n, HSP, potencia_ac_inversor, ahorro_anual_año1
+           lcoe, n, HSP, potencia_ac_inversor, ahorro_anual_año1, area_requerida
 
 # ==============================================================================
 # CLASE PARA EL REPORTE PDF
@@ -335,8 +339,8 @@ def main():
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, HSP_final, \
-            potencia_ac_inversor, ahorro_año1 = \
-                cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
+            potencia_ac_inversor, ahorro_año1, area_requerida = \
+                 cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
                            ciudad=ciudad_input, perc_financiamiento=perc_financiamiento, 
                            tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años, 
                            tasa_degradacion=0.001, precio_excedentes=300.0)
@@ -425,7 +429,7 @@ def main():
                 "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
                 "Valor Total del Proyecto (COP)": f"{valor_proyecto_total:,.2f}",
                 "Tamano del Sistema (kWp)": f"{size}",
-                "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W",
+                "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W","Área Requerida Aprox. (m²)": f"{area_requerida}",
                 "Inversor Recomendado": f"{recomendacion_inversor}",
                 "Generacion Promedio Mensual (kWh)": f"{generacion_promedio_mensual:,.1f}",
                 "Ahorro Estimado Primer Ano (COP)": f"{ahorro_año1:,.2f}",
@@ -459,6 +463,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
