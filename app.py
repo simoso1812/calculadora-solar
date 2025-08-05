@@ -9,8 +9,6 @@ import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import re
-import io
-from googleapiclient.http import MediaIoBaseUpload
 
 # ==============================================================================
 # 1. COPIA Y PEGA AQUÍ TODAS TUS FUNCIONES
@@ -224,11 +222,9 @@ def crear_subcarpetas(service, id_carpeta_padre, estructura):
 
 # Reemplaza tu función crear_carpeta_proyecto_en_drive actual con esta
 
-# Reemplaza la función crear_carpeta_proyecto_en_drive con esta versión
-
-def crear_carpeta_y_subir_pdf(nombre_proyecto, id_carpeta_padre, client_id, client_secret, refresh_token, pdf_bytes, nombre_pdf):
+def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id, client_secret, refresh_token):
     """
-    Crea la estructura de carpetas y sube el PDF a la subcarpeta correspondiente.
+    Crea la carpeta principal del proyecto y toda su estructura de subcarpetas.
     """
     try:
         creds = Credentials(
@@ -239,34 +235,30 @@ def crear_carpeta_y_subir_pdf(nombre_proyecto, id_carpeta_padre, client_id, clie
         )
         service = build('drive', 'v3', credentials=creds)
         
-        # 1. Crear la carpeta principal del proyecto
-        folder_metadata = {'name': nombre_proyecto, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [id_carpeta_padre]}
-        folder = service.files().create(body=folder_metadata, fields='id, webViewLink', supportsAllDrives=True).execute()
+        # --- 1. Crear la carpeta principal del proyecto ---
+        file_metadata = {
+            'name': nombre_proyecto,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [id_carpeta_padre]
+        }
+        folder = service.files().create(
+            body=file_metadata, 
+            fields='id, webViewLink',
+            supportsAllDrives=True
+        ).execute()
+        
         id_carpeta_principal_nueva = folder.get('id')
         
+        # --- 2. Crear toda la estructura de subcarpetas dentro de la principal ---
         if id_carpeta_principal_nueva:
-            # 2. Crear toda la estructura de subcarpetas
             with st.spinner("Creando estructura de subcarpetas..."):
                 crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
-            st.success("✅ Estructura de carpetas creada.")
-
-            # 3. Buscar el ID de la subcarpeta "01_Propuesta_y_Contratacion"
-            with st.spinner("Buscando carpeta de destino para el PDF..."):
-                query = f"'{id_carpeta_principal_nueva}' in parents and name='01_Propuesta_y_Contratacion'"
-                results = service.files().list(q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-                items = results.get('files', [])
-            
-                if items:
-                    id_carpeta_propuesta = items[0].get('id')
-                    # 4. Subir el PDF a esa subcarpeta
-                    subir_pdf_a_drive(service, id_carpeta_propuesta, nombre_pdf, pdf_bytes)
-                else:
-                    st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
-
+        
+        st.success(f"✅ Carpeta del proyecto y su estructura creadas en Google Drive.")
         return folder.get('webViewLink')
         
     except Exception as e:
-        st.error(f"Error en el proceso de Google Drive: {e}")
+        st.error(f"Error al crear la carpeta en Google Drive: {e}")
         return None
 
 
@@ -313,32 +305,6 @@ def obtener_siguiente_consecutivo(service, id_carpeta_padre):
     except Exception as e:
         st.error(f"Error al buscar consecutivo en Drive: {e}")
         return 1
-
-
-# Añade esta nueva función a tu app.py
-
-def subir_pdf_a_drive(service, id_carpeta_destino, nombre_archivo, pdf_bytes):
-    """Sube un archivo PDF en formato de bytes a una carpeta específica en Google Drive."""
-    try:
-        file_metadata = {
-            'name': nombre_archivo,
-            'parents': [id_carpeta_destino]
-        }
-        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
-        
-        file = service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink',
-            supportsAllDrives=True
-        ).execute()
-        
-        st.info(f"📄 PDF guardado en la carpeta 'Propuesta y Contratación'.")
-        return file.get('webViewLink')
-
-    except Exception as e:
-        st.error(f"Error al subir el PDF a Google Drive: {e}")
-        return None
 # ==============================================================================
 # 2. INTERFAZ DE STREAMLIT
 # ==============================================================================
@@ -419,9 +385,8 @@ def main():
         else:
             perc_financiamiento, tasa_interes_input, plazo_credito_años = 0, 0, 0
 
-     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
+    if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
-            # --- Lógica de cálculo y generación de nombres (sin cambios) ---
             año_actual = str(datetime.datetime.now().year)[-2:]
             numero_formateado = f"{numero_proyecto_del_año:03d}"
             codigo_proyecto = f"FV{año_actual}{numero_formateado}"
@@ -430,7 +395,7 @@ def main():
             else:
                 nombre_proyecto = f"{codigo_proyecto} - {nombre_cliente}"
             st.success(f"Proyecto Generado: {nombre_proyecto}")
-            
+
             index = index_input / 100
             dRate = dRate_input / 100
             tasa_interes_credito = tasa_interes_input / 100
@@ -523,44 +488,6 @@ def main():
                 "VPN (Valor Presente Neto) (COP)": f"{valor_presente:,.2f}",
                 "Periodo de Retorno (anos)": f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A"
             }
-
-             # 1. Mostrar resultados en la app y generar las figuras de los gráficos
-            st.header("Resultados de la Propuesta")
-            # ... (código de st.metric)
-            st.header("Análisis Gráfico")
-            fig1, ax1 = plt.subplots(figsize=(10, 5))
-            # ... (código para dibujar el gráfico 1)
-            st.pyplot(fig1)
-            fig2, ax2 = plt.subplots(figsize=(10, 5))
-            # ... (código para dibujar el gráfico 2)
-            st.pyplot(fig2)
-            
-            # 2. Guardar las figuras como archivos para el PDF
-            fig1.savefig('grafica_generacion.png', bbox_inches='tight')
-            fig2.savefig('grafica_flujo_caja.png', bbox_inches='tight')
-            
-            # 3. Preparar los datos y GENERAR EL PDF EN BYTES PRIMERO
-            datos_para_pdf = { # ... llena este diccionario como antes ...
-            }
-              # 4. AHORA SÍ, LLAMAR A LA FUNCIÓN DE GOOGLE DRIVE, pasando el PDF ya creado
-            try:
-                parent_folder_id = st.secrets["PARENT_FOLDER_ID"]
-                client_id = st.secrets["GOOGLE_CLIENT_ID"]
-                client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
-                refresh_token = st.secrets["GOOGLE_REFRESH_TOKEN"]
-
-                if all([parent_folder_id, client_id, client_secret, refresh_token]):
-                    link_carpeta = crear_carpeta_y_subir_pdf(
-                        nombre_proyecto, parent_folder_id, client_id, client_secret, refresh_token,
-                        pdf_bytes, nombre_pdf_final
-                    )
-                    if link_carpeta:
-                        st.info(f"➡️ [Abrir carpeta principal del proyecto en Google Drive]({link_carpeta})")
-                else:
-                    st.warning("Faltan secretos por configurar para la integración con Google Drive.")
-            except Exception as e:
-                st.warning(f"No se pudo completar la integración con Google Drive. Error: {e}")
-            
             if usa_financiamiento:
                 datos_para_pdf["--- Detalles de Financiamiento ---"] = ""
                 datos_para_pdf["Monto a Financiar (COP)"] = f"{monto_a_financiar:,.2f}"
@@ -569,7 +496,6 @@ def main():
             
             pdf = PropuestaPDF(client_name=nombre_cliente, project_name=nombre_proyecto)
             pdf_bytes = pdf.generar(datos_para_pdf)
-            nombre_pdf_final = f"{nombre_proyecto}.pdf"
             
             st.download_button(
                 label="📥 Descargar Reporte en PDF",
@@ -583,7 +509,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
 
 
