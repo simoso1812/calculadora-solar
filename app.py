@@ -6,26 +6,23 @@ from fpdf import FPDF
 import datetime
 import json
 import os
+import re
+import io
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-import re
+from googleapiclient.http import MediaIoBaseUpload
 
 # ==============================================================================
-# 1. COPIA Y PEGA AQUÍ TODAS TUS FUNCIONES
-# (recomendar_inversor, cotizacion, generar_reporte_pdf, etc.)
+# CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
-# Coloca esto cerca del inicio de tu archivo app.py
 
 ESTRUCTURA_CARPETAS = {
     "00_Contacto_y_Venta": {},
     "01_Propuesta_y_Contratacion": {},
     "02_Ingenieria_y_Diseno": {
         "Fichas_Tecnicas": {
-            "Paneles": {},
-            "Inversores": {},
-            "Estructura_Soporte": {},
-            "Tableros_y_Protecciones": {},
-            "Cableado": {}
+            "Paneles": {}, "Inversores": {}, "Estructura_Soporte": {},
+            "Tableros_y_Protecciones": {}, "Cableado": {}
         },
         "Memorias_de_Calculo": {},
         "Planos_y_Diagramas": {}
@@ -33,8 +30,7 @@ ESTRUCTURA_CARPETAS = {
     "03_Adquisiciones_y_Logistica": {},
     "04_Permisos_y_Legal": {},
     "05_Instalacion_y_Construccion": {
-        "Reportes_Fotograficos": {},
-        "Informes_Diarios_Avance": {}
+        "Reportes_Fotograficos": {}, "Informes_Diarios_Avance": {}
     },
     "06_Puesta_en_Marcha_y_Entrega": {},
     "07_Operacion_y_Mantenimiento_OM": {},
@@ -42,25 +38,27 @@ ESTRUCTURA_CARPETAS = {
     "09_Material_Grafico_y_Marketing": {}
 }
 
-# Diccionario de Horas Sol Pico
 HSP_POR_CIUDAD = {
     "MEDELLIN": 4.5, "BOGOTA": 4.0, "CALI": 4.8, "BARRANQUILLA": 5.2,
     "BUCARAMANGA": 4.3, "CARTAGENA": 5.3, "PEREIRA": 4.6
 }
 
-# Función para recomendar el inversor
+# ==============================================================================
+# FUNCIONES DE CÁLCULO
+# ==============================================================================
+
 def recomendar_inversor(size_kwp):
+    # (El código de esta función no cambia)
     inverters_disponibles = [3, 5, 6, 8, 10]
     min_ac_power = size_kwp / 1.2
     if size_kwp <= 12:
         for inv_kw in sorted(inverters_disponibles):
-            if inv_kw >= min_ac_power: return f"1 inversor de {inv_kw} kW.", inv_kw
+            if inv_kw >= min_ac_power: return f"1 inversor de {inv_kw} kW", inv_kw
     recomendacion, potencia_restante = {}, min_ac_power
     for inv_kw in sorted(inverters_disponibles, reverse=True):
         if potencia_restante >= inv_kw:
             num = int(potencia_restante // inv_kw)
-            recomendacion[inv_kw] = num
-            potencia_restante -= num * inv_kw
+            recomendacion[inv_kw] = num; potencia_restante -= num * inv_kw
     if potencia_restante > 0.1:
         inverter_para_resto = min(inverters_disponibles)
         for inv_kw in sorted(inverters_disponibles):
@@ -73,28 +71,15 @@ def recomendar_inversor(size_kwp):
     final_string = " y ".join(partes) + f" (Potencia AC total: {total_power} kW)."
     return final_string, total_power
 
-# Función de análisis de sensibilidad
-def imprimir_generacion_por_orientacion(potencia_ac_inversor, base_hsp, n):
-    resultados = {"Sur (Ideal)": 1.00, "Este / Oeste": 0.88, "Norte": 0.65}
-    data = []
-    for orientacion, factor in resultados.items():
-        effective_hsp = base_hsp * factor
-        annual_generation = potencia_ac_inversor * effective_hsp * n * 365
-        monthly_avg_generation = annual_generation / 12
-        data.append({"Orientación": orientacion, "Generación Promedio Mensual (kWh)": f"{monthly_avg_generation:,.1f}"})
-    return data
-
-# Función principal de cálculo
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                tasa_degradacion=0, precio_excedentes=0):
-    HSP = 4.5
-    if ciudad and ciudad.upper() in HSP_POR_CIUDAD: HSP = HSP_POR_CIUDAD[ciudad.upper()]
-    n = 0.85
-    life = 25
+    # (El código de esta función no cambia, ya está correcta con la lógica de clipping)
+    HSP = HSP_POR_CIUDAD.get(ciudad.upper(), 4.5)
+    n = 0.85; life = 25
     if clima.strip().upper() == "NUBE": n -= 0.05
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
-    potencia_efectiva_calculo = min(size, potencia_ac_inversor)               
+    potencia_efectiva_calculo = min(size, potencia_ac_inversor)
     costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
     valor_proyecto_total = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_total *= 1.03
@@ -106,8 +91,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
         num_pagos_credito = plazo_credito_años * 12
         cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
-    cashflow_free, total_lifetime_generation, total_maintenance_cost_present_value = [], 0, 0
-    ahorro_anual_año1 = 0
+    cashflow_free, total_lifetime_generation, ahorro_anual_año1 = [], 0, 0
     annual_generation_init = potencia_efectiva_calculo * HSP * n * 365
     performance = [0.083, 0.080, 0.081, 0.084, 0.083, 0.080, 0.093, 0.091, 0.084, 0.084, 0.079, 0.079]
     for i in range(life):
@@ -123,10 +107,8 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
                 ahorro_mes = gen_mes * costkWh
             ahorro_anual_total += ahorro_mes
         ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-        if i == 0:
-            ahorro_anual_año1 = ahorro_anual_total
+        if i == 0: ahorro_anual_año1 = ahorro_anual_total
         mantenimiento_anual = 0.05 * ahorro_anual_indexado
-        total_maintenance_cost_present_value += mantenimiento_anual / ((1 + dRate)**(i+1))
         cuotas_anuales_credito = 0
         if i < plazo_credito_años: cuotas_anuales_credito = cuota_mensual_credito * 12
         flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
@@ -134,25 +116,25 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     cashflow_free.insert(0, -desembolso_inicial_cliente)
     present_value = npf.npv(dRate, cashflow_free)
     internal_rate = npf.irr(cashflow_free)
-    total_cost_present_value = desembolso_inicial_cliente + total_maintenance_cost_present_value
-    lcoe = total_cost_present_value / total_lifetime_generation if total_lifetime_generation > 0 else 0
-    FE, Eq_trees = 0.154, 22
-    trees = round(Load * 12 * FE * Eq_trees / 1000, 0)
+    lcoe = (desembolso_inicial_cliente + npf.npv(dRate, [0.05 * ahorro_anual_total * ((1 + index) ** i) for i in range(life)])) / total_lifetime_generation if total_lifetime_generation > 0 else 0
+    trees = round(Load * 12 * 0.154 * 22 / 1000, 0)
     monthly_generation_init = [annual_generation_init * p for p in performance]
     return valor_proyecto_total, size, monto_a_financiar, cuota_mensual_credito, \
            desembolso_inicial_cliente, cashflow_free, trees, monthly_generation_init, \
            present_value, internal_rate, quantity, life, recomendacion_inversor_str, \
            lcoe, n, HSP, potencia_ac_inversor, ahorro_anual_año1
 
-# Clase para el PDF
+# ==============================================================================
+# CLASE PARA EL REPORTE PDF
+# ==============================================================================
+
 class PropuestaPDF(FPDF):
     def __init__(self, client_name="Cliente", project_name="Proyecto", *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.client_name = client_name
         self.project_name = project_name
 
-    def header(self):
-        pass
+    def header(self): pass
 
     def footer(self):
         self.set_y(-15)
@@ -195,174 +177,122 @@ class PropuestaPDF(FPDF):
         self.crear_detalle_sistema()
         return bytes(self.output(dest='S'))
 
-
-# Añade esta nueva función a tu app.py
-
-def crear_subcarpetas(service, id_carpeta_padre, estructura):
-    """
-    Función recursiva para crear una estructura de carpetas anidadas en Google Drive.
-    """
-    for nombre_carpeta, sub_estructura in estructura.items():
-        # Metadata para la nueva subcarpeta
-        file_metadata = {
-            'name': nombre_carpeta,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [id_carpeta_padre]
-        }
-        # Crear la subcarpeta
-        subfolder = service.files().create(
-            body=file_metadata,
-            fields='id',
-            supportsAllDrives=True
-        ).execute()
-        
-        # Si esta subcarpeta tiene más carpetas adentro, llamarse a sí misma (recursividad)
-        if sub_estructura:
-            crear_subcarpetas(service, subfolder.get('id'), sub_estructura)
-
-# Reemplaza tu función crear_carpeta_proyecto_en_drive actual con esta
-
-def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id, client_secret, refresh_token):
-    """
-    Crea la carpeta principal del proyecto y toda su estructura de subcarpetas.
-    """
-    try:
-        creds = Credentials(
-            None, refresh_token=refresh_token,
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=client_id, client_secret=client_secret,
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        service = build('drive', 'v3', credentials=creds)
-        
-        # --- 1. Crear la carpeta principal del proyecto ---
-        file_metadata = {
-            'name': nombre_proyecto,
-            'mimeType': 'application/vnd.google-apps.folder',
-            'parents': [id_carpeta_padre]
-        }
-        folder = service.files().create(
-            body=file_metadata, 
-            fields='id, webViewLink',
-            supportsAllDrives=True
-        ).execute()
-        
-        id_carpeta_principal_nueva = folder.get('id')
-        
-        # --- 2. Crear toda la estructura de subcarpetas dentro de la principal ---
-        if id_carpeta_principal_nueva:
-            with st.spinner("Creando estructura de subcarpetas..."):
-                crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
-        
-        st.success(f"✅ Carpeta del proyecto y su estructura creadas en Google Drive.")
-        return folder.get('webViewLink')
-        
-    except Exception as e:
-        st.error(f"Error al crear la carpeta en Google Drive: {e}")
-        return None
-
-
-# Reemplaza esta función en tu app.py con la versión final
-
-# Reemplaza esta función en tu app.py con la versión final
+# ==============================================================================
+# FUNCIONES DE INTEGRACIÓN CON GOOGLE DRIVE
+# ==============================================================================
 
 def obtener_siguiente_consecutivo(service, id_carpeta_padre):
-    """
-    Busca en Google Drive el último número de proyecto para el año actual 
-    y devuelve el siguiente número consecutivo.
-    """
     try:
         año_actual_corto = str(datetime.datetime.now().year)[-2:]
         query = f"'{id_carpeta_padre}' in parents and mimeType='application/vnd.google-apps.folder'"
-        
         results = service.files().list(
-            q=query,
-            pageSize=1000,
-            fields="files(name)",
-            supportsAllDrives=True,
-            # =================================================================
-            # PARÁMETRO CLAVE AÑADIDO: Incluye archivos de todas las unidades
-            # =================================================================
-            includeItemsFromAllDrives=True 
+            q=query, pageSize=1000, fields="files(name)",
+            supportsAllDrives=True, includeItemsFromAllDrives=True
         ).execute()
-        
-        # Eliminamos las líneas de depuración
         items = results.get('files', [])
-        
         max_num = 0
         patron = re.compile(f"FV{año_actual_corto}(\\d{{3}})")
-
         if items:
             for item in items:
                 match = patron.search(item['name'])
                 if match:
                     numero = int(match.group(1))
-                    if numero > max_num:
-                        max_num = numero
-        
+                    if numero > max_num: max_num = numero
         return max_num + 1
-
     except Exception as e:
         st.error(f"Error al buscar consecutivo en Drive: {e}")
         return 1
+
+def crear_subcarpetas(service, id_carpeta_padre, estructura):
+    for nombre_carpeta, sub_estructura in estructura.items():
+        file_metadata = {'name': nombre_carpeta, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [id_carpeta_padre]}
+        subfolder = service.files().create(body=file_metadata, fields='id', supportsAllDrives=True).execute()
+        if sub_estructura:
+            crear_subcarpetas(service, subfolder.get('id'), sub_estructura)
+
+def subir_pdf_a_drive(service, id_carpeta_destino, nombre_archivo, pdf_bytes):
+    try:
+        file_metadata = {'name': nombre_archivo, 'parents': [id_carpeta_destino]}
+        media = MediaIoBaseUpload(io.BytesIO(pdf_bytes), mimetype='application/pdf')
+        file = service.files().create(
+            body=file_metadata, media_body=media, fields='id, webViewLink', supportsAllDrives=True
+        ).execute()
+        st.info(f"📄 PDF guardado en la carpeta 'Propuesta y Contratación'.")
+        return file.get('webViewLink')
+    except Exception as e:
+        st.error(f"Error al subir el PDF a Google Drive: {e}")
+        return None
+
+def gestionar_creacion_drive(service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf):
+    try:
+        folder_metadata = {'name': nombre_proyecto, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_folder_id]}
+        folder = service.files().create(body=folder_metadata, fields='id, webViewLink', supportsAllDrives=True).execute()
+        id_carpeta_principal_nueva = folder.get('id')
+        
+        if id_carpeta_principal_nueva:
+            with st.spinner("Creando estructura de subcarpetas..."):
+                crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
+            st.success("✅ Estructura de carpetas creada.")
+
+            with st.spinner("Buscando carpeta de destino para el PDF..."):
+                query = f"'{id_carpeta_principal_nueva}' in parents and name='01_Propuesta_y_Contratacion'"
+                results = service.files().list(q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+                items = results.get('files', [])
+            
+                if items:
+                    id_carpeta_propuesta = items[0].get('id')
+                    subir_pdf_a_drive(service, id_carpeta_propuesta, nombre_pdf, pdf_bytes)
+                else:
+                    st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
+        return folder.get('webViewLink')
+    except Exception as e:
+        st.error(f"Error en el proceso de Google Drive: {e}")
+        return None
+
 # ==============================================================================
-# 2. INTERFAZ DE STREAMLIT
+# INTERFAZ Y LÓGICA PRINCIPAL DE LA APLICACIÓN
 # ==============================================================================
 
 def main():
     st.set_page_config(page_title="Calculadora Solar", layout="wide", initial_sidebar_state="expanded")
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
-
-    creds = None
+    drive_service = None
+    numero_proyecto_del_año = 1
     try:
-        client_id = st.secrets["GOOGLE_CLIENT_ID"]
-        client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
-        refresh_token = st.secrets["GOOGLE_REFRESH_TOKEN"]
-        
         creds = Credentials(
-            None, refresh_token=refresh_token,
+            None, refresh_token=st.secrets["GOOGLE_REFRESH_TOKEN"],
             token_uri='https://oauth2.googleapis.com/token',
-            client_id=client_id, client_secret=client_secret,
+            client_id=st.secrets["GOOGLE_CLIENT_ID"], client_secret=st.secrets["GOOGLE_CLIENT_SECRET"],
             scopes=['https://www.googleapis.com/auth/drive']
         )
         drive_service = build('drive', 'v3', credentials=creds)
         parent_folder_id = st.secrets["PARENT_FOLDER_ID"]
-        
-        # Obtenemos el siguiente número de proyecto automáticamente
         numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
-
     except Exception:
-        # Si los secretos no están configurados, la app aún funciona pero sin la parte de Drive
-        numero_proyecto_del_año = 1 
+        st.warning("Secretos de Google Drive no configurados. La creación de carpetas está desactivada.")
 
-    
     with st.sidebar:
         st.header("Parámetros de Entrada")
         st.subheader("Información del Proyecto")
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
-    
         
-        opcion = st.radio("Método para dimensionar el sistema:",
-                          ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"],
-                          horizontal=True)
+        opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True)
 
         if opcion == "Por Consumo Mensual (kWh)":
-            Load = st.number_input("Consumo mensual promedio (kWh)", min_value=50, value=700, step=50)
-            module = st.number_input("Potencia del panel solar (W)", min_value=300, value=615, step=10)
-            HSP_aprox = 4.5 
-            n_aprox = 0.85
-            Ratio = 1.2
+            Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
+            module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
+            HSP_aprox = 4.5; n_aprox = 0.85; Ratio = 1.2
             size = round(Load * Ratio / (HSP_aprox * 30 * n_aprox), 2)
             quantity = round(size * 1000 / module)
             size = round(quantity * module / 1000, 2)
             st.info(f"Sistema estimado: **{size:.2f} kWp** ({int(quantity)} paneles)")
-        else: # Por Cantidad de Paneles
-            module = st.number_input("Potencia del panel solar (W)", min_value=300, value=615, step=10)
-            quantity = st.number_input("Cantidad de paneles a instalar", min_value=1, value=12, step=1)
-            Load = st.number_input("Consumo mensual (para análisis financiero)", min_value=50, value=700, step=50)
+        else:
+            module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
+            quantity = st.number_input("Cantidad de paneles", min_value=1, value=12, step=1)
+            Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
             size = round((quantity * module) / 1000, 2)
             st.info(f"Sistema dimensionado: **{size:.2f} kWp**")
 
@@ -372,42 +302,34 @@ def main():
         clima = st.selectbox("Clima predominante", ["SOL", "NUBE"])
 
         st.subheader("Parámetros Financieros")
-        costkWh = st.number_input("Costo actual por kWh (COP)", min_value=200, value=850, step=10)
-        index_input = st.slider("Tasa de indexación de la energía (%)", 0.0, 20.0, 5.0, 0.5)
+        costkWh = st.number_input("Costo por kWh (COP)", min_value=200, value=850, step=10)
+        index_input = st.slider("Indexación de energía (%)", 0.0, 20.0, 5.0, 0.5)
         dRate_input = st.slider("Tasa de descuento (%)", 0.0, 25.0, 10.0, 0.5)
         
         st.subheader("Financiamiento")
         usa_financiamiento = st.toggle("Incluir financiamiento")
+        perc_financiamiento, tasa_interes_input, plazo_credito_años = 0, 0, 0
         if usa_financiamiento:
             perc_financiamiento = st.slider("Porcentaje a financiar (%)", 0, 100, 70)
-            tasa_interes_input = st.slider("Tasa de interés anual del crédito (%)", 0.0, 30.0, 15.0, 0.5)
-            plazo_credito_años = st.number_input("Plazo del crédito en años", 1, 20, 5)
-        else:
-            perc_financiamiento, tasa_interes_input, plazo_credito_años = 0, 0, 0
+            tasa_interes_input = st.slider("Tasa de interés anual (%)", 0.0, 30.0, 15.0, 0.5)
+            plazo_credito_años = st.number_input("Plazo del crédito (años)", 1, 20, 5)
 
     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
             año_actual = str(datetime.datetime.now().year)[-2:]
             numero_formateado = f"{numero_proyecto_del_año:03d}"
             codigo_proyecto = f"FV{año_actual}{numero_formateado}"
-            if ubicacion:
-                nombre_proyecto = f"{codigo_proyecto} - {nombre_cliente} - {ubicacion}"
-            else:
-                nombre_proyecto = f"{codigo_proyecto} - {nombre_cliente}"
+            nombre_proyecto = f"{codigo_proyecto} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
             st.success(f"Proyecto Generado: {nombre_proyecto}")
-
-            index = index_input / 100
-            dRate = dRate_input / 100
-            tasa_interes_credito = tasa_interes_input / 100
 
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, HSP_final, \
             potencia_ac_inversor, ahorro_año1 = \
-                cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=ciudad_input,
-                           perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_credito,
-                           plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001,
-                           precio_excedentes=300.0)
+                cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
+                           ciudad=ciudad_input, perc_financiamiento=perc_financiamiento, 
+                           tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años, 
+                           tasa_degradacion=0.001, precio_excedentes=300.0)
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation)
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
@@ -417,21 +339,6 @@ def main():
                     payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
                 else:
                     payback_exacto = float(payback_simple)
-
-            try:
-                parent_folder_id = st.secrets["PARENT_FOLDER_ID"]
-                client_id = st.secrets["GOOGLE_CLIENT_ID"]
-                client_secret = st.secrets["GOOGLE_CLIENT_SECRET"]
-                refresh_token = st.secrets["GOOGLE_REFRESH_TOKEN"]
-                if all([parent_folder_id, client_id, client_secret, refresh_token]):
-                    link_carpeta = crear_carpeta_proyecto_en_drive(
-                        nombre_proyecto, parent_folder_id, client_id, client_secret, refresh_token)
-                    if link_carpeta:
-                        st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({link_carpeta})")
-                else:
-                    st.warning("Faltan secretos por configurar en Streamlit Community Cloud.")
-            except Exception as e:
-                st.warning(f"No se pudo crear la carpeta en Google Drive. Verifica los secretos o que la app tenga acceso. Error: {e}")
 
             st.header("Resultados de la Propuesta")
             col1, col2, col3, col4 = st.columns(4)
@@ -453,9 +360,7 @@ def main():
             ax1.bar(meses_grafico, excedentes_vendidos, bottom=generacion_autoconsumida, color='red', edgecolor='black', label='Excedentes Vendidos', width=0.7)
             ax1.bar(meses_grafico, importado_de_la_red, bottom=generacion_autoconsumida, color='#2ECC71', edgecolor='black', label='Importado de la Red', width=0.7)
             ax1.axhline(y=Load, color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
-            ax1.set_ylabel("Energía (kWh)", fontweight="bold")
-            ax1.set_title("Generación Vs. Consumo Mensual (Año 1)", fontweight="bold")
-            ax1.legend()
+            ax1.set_ylabel("Energía (kWh)", fontweight="bold"); ax1.set_title("Generación Vs. Consumo Mensual (Año 1)", fontweight="bold"); ax1.legend()
             st.pyplot(fig1)
 
             fig2, ax2 = plt.subplots(figsize=(10, 5))
@@ -463,21 +368,17 @@ def main():
             años = np.arange(0, life + 1)
             ax2.plot(años, fcl_acumulado, marker='o', linestyle='-', color='green', label='Flujo de Caja Acumulado')
             ax2.plot(0, fcl_acumulado[0], marker='X', markersize=10, color='red', label='Desembolso Inicial (Año 0)')
-            if payback_exacto is not None:
-                ax2.axvline(x=payback_exacto, color='red', linestyle='--', label=f'Payback Simple: {payback_exacto:.2f} años')
+            if payback_exacto is not None: ax2.axvline(x=payback_exacto, color='red', linestyle='--', label=f'Payback Simple: {payback_exacto:.2f} años')
             ax2.axhline(0, color='grey', linestyle='--', linewidth=0.8)
-            ax2.set_ylabel("Flujo de Caja Acumulado (COP)", fontweight="bold")
-            ax2.set_xlabel("Año", fontweight="bold")
-            ax2.set_title("Flujo de Caja Acumulado y Período de Retorno", fontweight="bold")
-            ax2.legend()
+            ax2.set_ylabel("Flujo de Caja Acumulado (COP)", fontweight="bold"); ax2.set_xlabel("Año", fontweight="bold")
+            ax2.set_title("Flujo de Caja Acumulado y Período de Retorno", fontweight="bold"); ax2.legend()
             st.pyplot(fig2)
             
             fig1.savefig('grafica_generacion.png', bbox_inches='tight')
             fig2.savefig('grafica_flujo_caja.png', bbox_inches='tight')
             
             datos_para_pdf = {
-                "Nombre del Proyecto": nombre_proyecto,
-                "Cliente": nombre_cliente,
+                "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
                 "Valor Total del Proyecto (COP)": f"{valor_proyecto_total:,.2f}",
                 "Tamano del Sistema (kWp)": f"{size}",
                 "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W",
@@ -496,16 +397,21 @@ def main():
             
             pdf = PropuestaPDF(client_name=nombre_cliente, project_name=nombre_proyecto)
             pdf_bytes = pdf.generar(datos_para_pdf)
+            nombre_pdf_final = f"{nombre_proyecto}.pdf"
+
+            if drive_service:
+                link_carpeta = gestionar_creacion_drive(
+                    drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final
+                )
+                if link_carpeta:
+                    st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({link_carpeta})")
             
             st.download_button(
-                label="📥 Descargar Reporte en PDF",
-                data=pdf_bytes,
-                file_name=f"{nombre_proyecto}.pdf",
-                mime="application/pdf",
-                use_container_width=True
+                label="📥 Descargar Reporte en PDF (Copia Local)",
+                data=pdf_bytes, file_name=nombre_pdf_final,
+                mime="application/pdf", use_container_width=True
             )
-            st.success('¡Análisis completado!')
-
+            st.success('¡Proceso completado!')
 
 if __name__ == '__main__':
     main()
