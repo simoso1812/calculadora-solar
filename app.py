@@ -419,7 +419,7 @@ def main():
         else:
             perc_financiamiento, tasa_interes_input, plazo_credito_años = 0, 0, 0
 
-     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
+    if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
             # --- Lógica de cálculo y generación de nombres (sin cambios) ---
             año_actual = str(datetime.datetime.now().year)[-2:]
@@ -583,6 +583,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
