@@ -3,3 +3,6 @@ numpy
 numpy_financial
 fpdf2
 matplotlib
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
