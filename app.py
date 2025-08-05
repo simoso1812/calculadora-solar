@@ -14,6 +14,33 @@ import re
 # 1. COPIA Y PEGA AQUÍ TODAS TUS FUNCIONES
 # (recomendar_inversor, cotizacion, generar_reporte_pdf, etc.)
 # ==============================================================================
+# Coloca esto cerca del inicio de tu archivo app.py
+
+ESTRUCTURA_CARPETAS = {
+    "00_Contacto_y_Venta": {},
+    "01_Propuesta_y_Contratacion": {},
+    "02_Ingenieria_y_Diseno": {
+        "Fichas_Tecnicas": {
+            "Paneles": {},
+            "Inversores": {},
+            "Estructura_Soporte": {},
+            "Tableros_y_Protecciones": {},
+            "Cableado": {}
+        },
+        "Memorias_de_Calculo": {},
+        "Planos_y_Diagramas": {}
+    },
+    "03_Adquisiciones_y_Logistica": {},
+    "04_Permisos_y_Legal": {},
+    "05_Instalacion_y_Construccion": {
+        "Reportes_Fotograficos": {},
+        "Informes_Diarios_Avance": {}
+    },
+    "06_Puesta_en_Marcha_y_Entrega": {},
+    "07_Operacion_y_Mantenimiento_OM": {},
+    "08_Administrativo_y_Financiero": {},
+    "09_Material_Grafico_y_Marketing": {}
+}
 
 # Diccionario de Horas Sol Pico
 HSP_POR_CIUDAD = {
@@ -168,7 +195,37 @@ class PropuestaPDF(FPDF):
         self.crear_detalle_sistema()
         return bytes(self.output(dest='S'))
 
+
+# Añade esta nueva función a tu app.py
+
+def crear_subcarpetas(service, id_carpeta_padre, estructura):
+    """
+    Función recursiva para crear una estructura de carpetas anidadas en Google Drive.
+    """
+    for nombre_carpeta, sub_estructura in estructura.items():
+        # Metadata para la nueva subcarpeta
+        file_metadata = {
+            'name': nombre_carpeta,
+            'mimeType': 'application/vnd.google-apps.folder',
+            'parents': [id_carpeta_padre]
+        }
+        # Crear la subcarpeta
+        subfolder = service.files().create(
+            body=file_metadata,
+            fields='id',
+            supportsAllDrives=True
+        ).execute()
+        
+        # Si esta subcarpeta tiene más carpetas adentro, llamarse a sí misma (recursividad)
+        if sub_estructura:
+            crear_subcarpetas(service, subfolder.get('id'), sub_estructura)
+
+# Reemplaza tu función crear_carpeta_proyecto_en_drive actual con esta
+
 def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id, client_secret, refresh_token):
+    """
+    Crea la carpeta principal del proyecto y toda su estructura de subcarpetas.
+    """
     try:
         creds = Credentials(
             None, refresh_token=refresh_token,
@@ -177,6 +234,8 @@ def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id
             scopes=['https://www.googleapis.com/auth/drive']
         )
         service = build('drive', 'v3', credentials=creds)
+        
+        # --- 1. Crear la carpeta principal del proyecto ---
         file_metadata = {
             'name': nombre_proyecto,
             'mimeType': 'application/vnd.google-apps.folder',
@@ -187,8 +246,17 @@ def crear_carpeta_proyecto_en_drive(nombre_proyecto, id_carpeta_padre, client_id
             fields='id, webViewLink',
             supportsAllDrives=True
         ).execute()
-        st.success(f"✅ Carpeta del proyecto creada en Google Drive.")
+        
+        id_carpeta_principal_nueva = folder.get('id')
+        
+        # --- 2. Crear toda la estructura de subcarpetas dentro de la principal ---
+        if id_carpeta_principal_nueva:
+            with st.spinner("Creando estructura de subcarpetas..."):
+                crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
+        
+        st.success(f"✅ Carpeta del proyecto y su estructura creadas en Google Drive.")
         return folder.get('webViewLink')
+        
     except Exception as e:
         st.error(f"Error al crear la carpeta en Google Drive: {e}")
         return None
@@ -441,6 +509,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
