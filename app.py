@@ -516,21 +516,54 @@ def main():
 
             
             st.header("Análisis Gráfico")
+            
+            # --- CÓDIGO DEL GRÁFICO 1 (GENERACIÓN VS CONSUMO) ---
             fig1, ax1 = plt.subplots(figsize=(10, 5))
             meses_grafico = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
-            generacion_autoconsumida, excedentes_vendidos, importado_de_la_red = [], [], []
-            for gen_mes in monthly_generation:
-                if gen_mes >= Load:
-                    generacion_autoconsumida.append(Load); excedentes_vendidos.append(gen_mes - Load); importado_de_la_red.append(0)
-                else:
-                    generacion_autoconsumida.append(gen_mes); excedentes_vendidos.append(0); importado_de_la_red.append(Load - gen_mes)
-            ax1.bar(meses_grafico, generacion_autoconsumida, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
-            ax1.bar(meses_grafico, excedentes_vendidos, bottom=generacion_autoconsumida, color='red', edgecolor='black', label='Excedentes Vendidos', width=0.7)
-            ax1.bar(meses_grafico, importado_de_la_red, bottom=generacion_autoconsumida, color='#2ECC71', edgecolor='black', label='Importado de la Red', width=0.7)
-            ax1.axhline(y=Load, color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
-            ax1.set_ylabel("Energía (kWh)", fontweight="bold"); ax1.set_title("Generación Vs. Consumo Mensual (Año 1)", fontweight="bold"); ax1.legend()
+
+            if incluir_baterias:
+                # --- LÓGICA PARA GRÁFICA OFF-GRID (CON BATERÍAS) ---
+                st.subheader("Flujo de Energía Mensual (Off-Grid)")
+                generacion_autoconsumida = []
+                energia_a_bateria = []
+                
+                for gen_mes in monthly_generation:
+                    # Lo que se consume directamente es el mínimo entre lo que se genera y lo que se necesita
+                    autoconsumo_mes = min(gen_mes, Load)
+                    # Lo que va a la batería es todo el excedente
+                    bateria_mes = max(0, gen_mes - autoconsumo_mes)
+                    
+                    generacion_autoconsumida.append(autoconsumo_mes)
+                    energia_a_bateria.append(bateria_mes)
+
+                ax1.bar(meses_grafico, generacion_autoconsumida, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
+                ax1.bar(meses_grafico, energia_a_bateria, bottom=generacion_autoconsumida, color='green', edgecolor='black', label='Energía Almacenada en Batería', width=0.7)
+                ax1.axhline(y=Load, color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
+                ax1.set_ylabel("Energía (kWh)", fontweight="bold")
+                ax1.set_title("Flujo de Energía Mensual Estimado (Off-Grid)", fontweight="bold")
+                ax1.legend()
+
+            else:
+                # --- LÓGICA PARA GRÁFICA ON-GRID (SIN BATERÍAS) ---
+                st.subheader("Generación Vs. Consumo Mensual (On-Grid)")
+                generacion_autoconsumida_on, excedentes_vendidos, importado_de_la_red = [], [], []
+                for gen_mes in monthly_generation:
+                    if gen_mes >= Load:
+                        generacion_autoconsumida_on.append(Load); excedentes_vendidos.append(gen_mes - Load); importado_de_la_red.append(0)
+                    else:
+                        generacion_autoconsumida_on.append(gen_mes); excedentes_vendidos.append(0); importado_de_la_red.append(Load - gen_mes)
+                
+                ax1.bar(meses_grafico, generacion_autoconsumida_on, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
+                ax1.bar(meses_grafico, excedentes_vendidos, bottom=generacion_autoconsumida_on, color='red', edgecolor='black', label='Excedentes Vendidos', width=0.7)
+                ax1.bar(meses_grafico, importado_de_la_red, bottom=generacion_autoconsumida_on, color='#2ECC71', edgecolor='black', label='Importado de la Red', width=0.7)
+                ax1.axhline(y=Load, color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
+                ax1.set_ylabel("Energía (kWh)", fontweight="bold")
+                ax1.set_title("Generación Vs. Consumo Mensual (On-Grid)", fontweight="bold")
+                ax1.legend()
+
             st.pyplot(fig1)
 
+    
             fig2, ax2 = plt.subplots(figsize=(10, 5))
             fcl_acumulado = np.cumsum(fcl)
             años = np.arange(0, life + 1)
@@ -583,6 +616,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
