@@ -441,8 +441,9 @@ def main():
                            # Nuevos argumentos que se pasan a la función:
                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                            profundidad_descarga=profundidad_descarga / 100,
+                           eficiencia_bateria=eficiencia_bateria / 100,
                            dias_autonomia=dias_autonomia)
-                           eficiencia_bateria=eficiencia_bateria / 100)
+                           
             
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation)
@@ -582,6 +583,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
