@@ -82,7 +82,9 @@ def recomendar_inversor(size_kwp):
 
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
-               tasa_degradacion=0, precio_excedentes=0):
+               tasa_degradacion=0, precio_excedentes=0,
+               incluir_baterias=False, costo_kwh_bateria=0, 
+               profundidad_descarga=0.9, eficiencia_bateria=0.95):
      # --- CÁLCULO DEL ÁREA REQUERIDA (NUEVO) ---
     area_por_panel = 2.3 * 1.0  # Dimensiones de 2.3m x 1m
     factor_seguridad = 1.20     # Se añade un 30% para mantenimiento y espacios
@@ -96,6 +98,23 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
     valor_proyecto_total = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_total *= 1.03
+    costo_bateria = 0
+    capacidad_nominal_bateria = 0
+    if incluir_baterias:
+        consumo_diario = Load / 30
+        generacion_diaria_promedio = (potencia_efectiva_calculo * HSP * n * 365 / 12) / 30
+        excedente_diario = max(0, generacion_diaria_promedio - consumo_diario)
+        
+        # Se recomienda una batería para almacenar el excedente de un día
+        capacidad_util_bateria = excedente_diario
+        
+        # Se calcula la capacidad nominal basado en la profundidad de descarga
+        if profundidad_descarga > 0:
+            capacidad_nominal_bateria = capacidad_util_bateria / profundidad_descarga
+        
+        costo_bateria = capacidad_nominal_bateria * costo_kwh_bateria
+    
+    valor_proyecto_total = valor_proyecto_fv + costo_bateria
     valor_proyecto_total = math.ceil(valor_proyecto_total)
     monto_a_financiar = valor_proyecto_total * (perc_financiamiento / 100)
     monto_a_financiar = math.ceil(monto_a_financiar)              
@@ -137,7 +156,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     return valor_proyecto_total, size, monto_a_financiar, cuota_mensual_credito, \
            desembolso_inicial_cliente, cashflow_free, trees, monthly_generation_init, \
            present_value, internal_rate, quantity, life, recomendacion_inversor_str, \
-           lcoe, n, HSP, potencia_ac_inversor, ahorro_anual_año1, area_requerida
+           lcoe, n, HSP, potencia_ac_inversor, ahorro_anual_año1, area_requerida, capacidad_nominal_bateria
 
 # ==============================================================================
 # CLASE PARA EL REPORTE PDF
@@ -373,6 +392,19 @@ def main():
             perc_financiamiento = st.slider("Porcentaje a financiar (%)", 0, 100, 70)
             tasa_interes_input = st.slider("Tasa de interés anual (%)", 0.0, 30.0, 15.0, 0.5)
             plazo_credito_años = st.number_input("Plazo del crédito (años)", 1, 20, 5)
+            
+        st.subheader("Almacenamiento (Baterías)")
+        incluir_baterias = st.toggle("Añadir baterías al sistema")
+        
+        costo_kwh_bateria = 0
+        profundidad_descarga = 90.0
+        eficiencia_bateria = 95.0
+
+        if incluir_baterias:
+            costo_kwh_bateria = st.number_input("Costo por kWh de batería (COP)", min_value=100000, value=2500000, step=100000)
+            profundidad_descarga = st.slider("Profundidad de Descarga (DoD) permitida (%)", 50.0, 100.0, 90.0, 0.5)
+            eficiencia_bateria = st.slider("Eficiencia de Carga/Descarga (%)", 80.0, 100.0, 95.0, 0.5)
+
 
     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
@@ -385,11 +417,15 @@ def main():
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, HSP_final, \
-            potencia_ac_inversor, ahorro_año1, area_requerida = \
-                 cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
+            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_bateria_kwh = \
+                cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
                            ciudad=ciudad_input, perc_financiamiento=perc_financiamiento, 
                            tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años, 
-                           tasa_degradacion=0.001, precio_excedentes=300.0)
+                           tasa_degradacion=0.001, precio_excedentes=300.0,
+                           # Nuevos argumentos que se pasan a la función:
+                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
+                           profundidad_descarga=profundidad_descarga / 100,
+                           eficiencia_bateria=eficiencia_bateria / 100)
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation)
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
@@ -437,6 +473,9 @@ def main():
                     label=f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)",
                     value=f"${math.ceil(ganancia_estimada_guia):,.0f}"
                 )
+                if incluir_baterias:
+                col4.metric("Batería Recomendada", f"{capacidad_bateria_kwh:.1f} kWh")
+
                 
                 st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
             with st.expander("📋 Ver Lista de Materiales (Referencia Interna)"):
@@ -525,6 +564,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
