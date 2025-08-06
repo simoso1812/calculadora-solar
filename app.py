@@ -442,7 +442,7 @@ def main():
                 st.subheader("Materiales de Montaje Estimados")
 
                 # Llamamos a la nueva función con los resultados del cálculo
-                lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta)
+                lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta, module, recomendacion_inversor)
                 
                 if lista_materiales:
                     # Convertimos el diccionario a un formato más legible para la tabla
@@ -523,6 +523,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
