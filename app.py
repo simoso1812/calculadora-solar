@@ -407,7 +407,7 @@ def main():
             tasa_interes_input = st.slider("Tasa de interés anual (%)", 0.0, 30.0, 15.0, 0.5)
             plazo_credito_años = st.number_input("Plazo del crédito (años)", 1, 20, 5)
             
-         st.subheader("Almacenamiento (Baterías) - Modo Off-Grid")
+        st.subheader("Almacenamiento (Baterías) - Modo Off-Grid")
         incluir_baterias = st.toggle("Añadir baterías (asumir sistema aislado)")
         
         costo_kwh_bateria = 0
@@ -581,6 +581,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
