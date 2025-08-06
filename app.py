@@ -442,6 +442,8 @@ def main():
             col2.metric("TIR", f"{tasa_interna:.2%}")
             col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
             col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
+            if incluir_baterias:
+                col4.metric("Batería Recomendada", f"{capacidad_bateria_kwh:.1f} kWh")
             # --- SECCIÓN DE ANÁLISIS FINANCIERO INTERNO (DETALLADO Y REDONDEADO) ---
             with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
                 st.subheader("Desglose Basado en Promedios Históricos")
@@ -473,9 +475,7 @@ def main():
                     label=f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)",
                     value=f"${math.ceil(ganancia_estimada_guia):,.0f}"
                 )
-                if incluir_baterias:
-                col4.metric("Batería Recomendada", f"{capacidad_bateria_kwh:.1f} kWh")
-
+               
                 
                 st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
             with st.expander("📋 Ver Lista de Materiales (Referencia Interna)"):
@@ -564,6 +564,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
