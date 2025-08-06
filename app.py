@@ -448,6 +448,7 @@ def main():
                 if lista_materiales:
                     # Convertimos el diccionario a un formato más legible para la tabla
                     df_materiales = pd.DataFrame(lista_materiales.items(), columns=['Material', 'Cantidad Estimada'])
+                    df_materiales.index = df_materiales.index + 1
                     st.table(df_materiales)
                 else:
                     st.write("No se calcularon materiales (cantidad de paneles es cero).")
@@ -524,6 +525,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
