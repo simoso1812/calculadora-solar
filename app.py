@@ -80,20 +80,14 @@ def recomendar_inversor(size_kwp):
     final_string = " y ".join(partes) + f" (Potencia AC total: {total_power} kW)."
     return final_string, total_power
 
+# Reemplaza tu función cotizacion completa con esta versión
+
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                tasa_degradacion=0, precio_excedentes=0,
                incluir_baterias=False, costo_kwh_bateria=0, 
-               profundidad_descarga=0.9, eficiencia_bateria=0.95):
+               profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2):
     
-    # =====================================================================
-    # LÍNEAS DE CÁLCULO DE ÁREA (RESTAURADAS)
-    # =====================================================================
-    area_por_panel = 2.3 * 1.0  # Dimensiones de 2.3m x 1m
-    factor_seguridad = 1.30     # Se añade un 30% para mantenimiento
-    area_requerida = math.ceil(quantity * area_por_panel * factor_seguridad)
-    # =====================================================================
-
     HSP = HSP_POR_CIUDAD.get(ciudad.upper(), 4.5)
     n = 0.85
     life = 25
@@ -102,17 +96,21 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
     potencia_efectiva_calculo = min(size, potencia_ac_inversor)
     
+    area_por_panel = 2.3 * 1.0
+    factor_seguridad = 1.30
+    area_requerida = math.ceil(quantity * area_por_panel * factor_seguridad)
+    
     costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
     valor_proyecto_fv = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
 
     costo_bateria = 0
     capacidad_nominal_bateria = 0
+    # --- NUEVA LÓGICA DE DIMENSIONAMIENTO OFF-GRID ---
     if incluir_baterias:
         consumo_diario = Load / 30
-        generacion_diaria_promedio = (potencia_efectiva_calculo * HSP * n * 365 / 12) / 30
-        excedente_diario = max(0, generacion_diaria_promedio - consumo_diario)
-        capacidad_util_bateria = excedente_diario
+        # La batería debe soportar el consumo total por los días de autonomía
+        capacidad_util_bateria = consumo_diario * dias_autonomia
         if profundidad_descarga > 0:
             capacidad_nominal_bateria = capacidad_util_bateria / profundidad_descarga
         costo_bateria = capacidad_nominal_bateria * costo_kwh_bateria
@@ -125,8 +123,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     
     cuota_mensual_credito = 0
     if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_credito > 0:
-        tasa_mensual_credito = tasa_interes_credito / 12
-        num_pagos_credito = plazo_credito_años * 12
+        tasa_mensual_credito = tasa_interes_credito / 12; num_pagos_credito = plazo_credito_años * 12
         cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
         cuota_mensual_credito = math.ceil(cuota_mensual_credito)
         
@@ -139,22 +136,31 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
         current_annual_generation = annual_generation_init * ((1 - tasa_degradacion) ** i)
         total_lifetime_generation += current_annual_generation
         ahorro_anual_total = 0
-        for p in performance:
-            gen_mes = current_annual_generation * p
-            consumo_mes = Load
-            if gen_mes >= consumo_mes:
-                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes)
-            else:
-                ahorro_mes = gen_mes * costkWh
-            ahorro_anual_total += ahorro_mes
+
+        # --- NUEVA LÓGICA DE AHORRO OFF-GRID ---
+        if incluir_baterias:
+            # En un sistema aislado, el ahorro es el 100% de la factura que se evita.
+            # Se asume que el sistema está bien dimensionado para cubrir el 100% del consumo.
+            ahorro_anual_total = (Load * 12) * costkWh
+        else:
+            # Lógica para sistema conectado a la red (On-Grid)
+            for p in performance:
+                gen_mes = current_annual_generation * p
+                consumo_mes = Load
+                if gen_mes >= consumo_mes:
+                    ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes)
+                else:
+                    ahorro_mes = gen_mes * costkWh
+                ahorro_anual_total += ahorro_mes
+        
         ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-        if i == 0:
-            ahorro_anual_año1 = ahorro_anual_total
+        if i == 0: ahorro_anual_año1 = ahorro_anual_total
         mantenimiento_anual = 0.05 * ahorro_anual_indexado
         cuotas_anuales_credito = 0
         if i < plazo_credito_años: cuotas_anuales_credito = cuota_mensual_credito * 12
         flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
         cashflow_free.append(flujo_anual)
+
     cashflow_free.insert(0, -desembolso_inicial_cliente)
     present_value = npf.npv(dRate, cashflow_free)
     internal_rate = npf.irr(cashflow_free)
@@ -401,14 +407,16 @@ def main():
             tasa_interes_input = st.slider("Tasa de interés anual (%)", 0.0, 30.0, 15.0, 0.5)
             plazo_credito_años = st.number_input("Plazo del crédito (años)", 1, 20, 5)
             
-        st.subheader("Almacenamiento (Baterías)")
-        incluir_baterias = st.toggle("Añadir baterías al sistema")
+         st.subheader("Almacenamiento (Baterías) - Modo Off-Grid")
+        incluir_baterias = st.toggle("Añadir baterías (asumir sistema aislado)")
         
         costo_kwh_bateria = 0
         profundidad_descarga = 90.0
         eficiencia_bateria = 95.0
+        dias_autonomia = 1 # Valor por defecto
 
         if incluir_baterias:
+            dias_autonomia = st.number_input("Días de autonomía deseados", min_value=1, max_value=7, value=2, step=1, help="Número de días que el sistema debe soportar el consumo sin sol.")
             costo_kwh_bateria = st.number_input("Costo por kWh de batería (COP)", min_value=100000, value=2500000, step=100000)
             profundidad_descarga = st.slider("Profundidad de Descarga (DoD) permitida (%)", 50.0, 100.0, 90.0, 0.5)
             eficiencia_bateria = st.slider("Eficiencia de Carga/Descarga (%)", 80.0, 100.0, 95.0, 0.5)
@@ -434,7 +442,8 @@ def main():
                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                            profundidad_descarga=profundidad_descarga / 100,
                            eficiencia_bateria=eficiencia_bateria / 100)
-            
+                           dias_autonomia=dias_autonomia)
+        
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation)
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
             payback_exacto = None
@@ -572,6 +581,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
