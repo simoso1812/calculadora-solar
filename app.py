@@ -83,10 +83,17 @@ def recomendar_inversor(size_kwp):
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                tasa_degradacion=0, precio_excedentes=0,
-               # Nuevos parámetros para la batería:
                incluir_baterias=False, costo_kwh_bateria=0, 
                profundidad_descarga=0.9, eficiencia_bateria=0.95):
     
+    # =====================================================================
+    # LÍNEAS DE CÁLCULO DE ÁREA (RESTAURADAS)
+    # =====================================================================
+    area_por_panel = 2.3 * 1.0  # Dimensiones de 2.3m x 1m
+    factor_seguridad = 1.30     # Se añade un 30% para mantenimiento
+    area_requerida = math.ceil(quantity * area_por_panel * factor_seguridad)
+    # =====================================================================
+
     HSP = HSP_POR_CIUDAD.get(ciudad.upper(), 4.5)
     n = 0.85
     life = 25
@@ -96,24 +103,20 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     potencia_efectiva_calculo = min(size, potencia_ac_inversor)
     
     costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
-    valor_proyecto_fv = costo_por_kwp * size # Costo solo del sistema FV
+    valor_proyecto_fv = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
 
-    # --- Lógica para dimensionar y costear la batería ---
     costo_bateria = 0
     capacidad_nominal_bateria = 0
     if incluir_baterias:
         consumo_diario = Load / 30
         generacion_diaria_promedio = (potencia_efectiva_calculo * HSP * n * 365 / 12) / 30
         excedente_diario = max(0, generacion_diaria_promedio - consumo_diario)
-        
         capacidad_util_bateria = excedente_diario
         if profundidad_descarga > 0:
             capacidad_nominal_bateria = capacidad_util_bateria / profundidad_descarga
-        
         costo_bateria = capacidad_nominal_bateria * costo_kwh_bateria
     
-    # El valor total del proyecto ahora suma el costo del sistema FV y el de la batería
     valor_proyecto_total = valor_proyecto_fv + costo_bateria
     valor_proyecto_total = math.ceil(valor_proyecto_total)
     
@@ -129,11 +132,9 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
         
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
     
-    # El resto de los cálculos financieros usan el nuevo valor_proyecto_total
     cashflow_free, total_lifetime_generation, ahorro_anual_año1 = [], 0, 0
     annual_generation_init = potencia_efectiva_calculo * HSP * n * 365
     performance = [0.083, 0.080, 0.081, 0.084, 0.083, 0.080, 0.093, 0.091, 0.084, 0.084, 0.079, 0.079]
-    # (El resto de la lógica de cálculo de cashflow no cambia...)
     for i in range(life):
         current_annual_generation = annual_generation_init * ((1 - tasa_degradacion) ** i)
         total_lifetime_generation += current_annual_generation
@@ -571,6 +572,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
