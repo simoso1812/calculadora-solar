@@ -190,7 +190,6 @@ class PropuestaPDF(FPDF):
         self.crear_resumen_ejecutivo(datos_calculadora)
         self.crear_detalle_sistema()
         return bytes(self.output(dest='S'))
-
 # ==============================================================================
 # FUNCIONES DE INTEGRACIÓN CON GOOGLE DRIVE
 # ==============================================================================
@@ -262,7 +261,53 @@ def gestionar_creacion_drive(service, parent_folder_id, nombre_proyecto, pdf_byt
     except Exception as e:
         st.error(f"Error en el proceso de Google Drive: {e}")
         return None
+# Reemplaza esta función en tu app.py
 
+def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
+    """
+    Calcula una lista de materiales de referencia, incluyendo los equipos principales.
+    """
+    if quantity <= 0:
+        return {}
+
+    # --- 1. Equipos Principales (NUEVO) ---
+    lista_materiales = {
+        f"Módulos Fotovoltaicos de {int(module_power)} W": int(quantity),
+        "Inversor(es) Recomendado(s)": inverter_info
+    }
+
+    # --- 2. Cálculo de Perfiles ---
+    paneles_por_fila_max = 4
+    numero_de_filas = math.ceil(quantity / paneles_por_fila_max)
+    perfiles_necesarios = numero_de_filas * 2
+    perfiles_total = perfiles_necesarios + 1
+
+    # --- 3. Cálculo de Clamps ---
+    midclamps_total = (quantity * 2) + 2
+    endclamps_total = (numero_de_filas * 4) + 2
+    groundclamps_total = perfiles_total + 1
+    
+    # --- 4. Cálculo de Sujeción a Cubierta ---
+    if cubierta.strip().upper() == "TEJA":
+        tipo_sujecion = "Accesorio para Teja de Barro"
+    else:
+        tipo_sujecion = "Soporte en L (L-Feet)"
+    
+    longitud_total_perfiles = perfiles_total * 4.7
+    sujeciones_necesarias = math.ceil(longitud_total_perfiles / 0.80)
+    sujeciones_total = sujeciones_necesarias + 2
+
+    # --- 5. Añadir los materiales de montaje al diccionario ---
+    materiales_montaje = {
+        "Perfiles de aluminio 4.7m": perfiles_total,
+        "Mid Clamps (abrazaderas intermedias)": midclamps_total,
+        "End Clamps (abrazaderas finales)": endclamps_total,
+        "Ground Clamps (puesta a tierra)": groundclamps_total,
+        tipo_sujecion: sujeciones_total
+    }
+    lista_materiales.update(materiales_montaje)
+    
+    return lista_materiales
 # ==============================================================================
 # INTERFAZ Y LÓGICA PRINCIPAL DE LA APLICACIÓN
 # ==============================================================================
@@ -393,6 +438,21 @@ def main():
                 )
                 
                 st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
+            with st.expander("📋 Ver Lista de Materiales (Referencia Interna)"):
+                st.subheader("Materiales de Montaje Estimados")
+
+                # Llamamos a la nueva función con los resultados del cálculo
+                lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta)
+                
+                if lista_materiales:
+                    # Convertimos el diccionario a un formato más legible para la tabla
+                    df_materiales = pd.DataFrame(lista_materiales.items(), columns=['Material', 'Cantidad Estimada'])
+                    st.table(df_materiales)
+                else:
+                    st.write("No se calcularon materiales (cantidad de paneles es cero).")
+                
+                st.warning("Nota: Esta es una lista de referencia para montaje y no incluye todos los componentes eléctricos. Las cantidades incluyen un pequeño margen de emergencia.")
+
 
             
             st.header("Análisis Gráfico")
@@ -463,6 +523,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
