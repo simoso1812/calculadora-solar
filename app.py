@@ -295,7 +295,7 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
         tipo_sujecion = "Soporte en L (L-Feet)"
     
     longitud_total_perfiles = perfiles_total * 4.7
-    sujeciones_necesarias = math.ceil(longitud_total_perfiles / 0.80)
+    sujeciones_necesarias = math.ceil(longitud_total_perfiles / 1)
     sujeciones_total = sujeciones_necesarias + 2
 
     # --- 5. Añadir los materiales de montaje al diccionario ---
@@ -524,6 +524,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
