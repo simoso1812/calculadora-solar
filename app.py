@@ -214,7 +214,7 @@ class PropuestaPDF(FPDF):
         
         # 1. Imagen de fondo (cubre toda la página A4: 210mm x 297mm)
         try:
-            self.image('background.jpg', x=0, y=0, w=210)
+            self.image('background.webp', x=0, y=0, w=210)
         except RuntimeError:
             st.warning("Advertencia: No se encontró 'background.jpg'. La portada no tendrá fondo.")
 
@@ -772,6 +772,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
