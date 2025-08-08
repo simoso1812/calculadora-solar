@@ -366,19 +366,24 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta a la API de PVGIS y procesa los datos de forma segura.
+    Se conecta a la API de PVGIS especificando la base de datos para las Américas.
     """
     try:
         api_url = 'https://re.jrc.ec.europa.eu/api/seriescalc'
         params = {
-            'lat': lat, 'lon': lon, 'startyear': 2005, 'endyear': 2020,
-            'outputformat': 'json', 'browser': 0
+            'lat': lat,
+            'lon': lon,
+            'startyear': 2005,
+            'endyear': 2020,
+            'outputformat': 'json',
+            # --- CAMBIO CLAVE: Especificamos la base de datos satelital ---
+            'raddatabase': 'PVGIS-NSRDB'
         }
+        
         response = requests.get(api_url, params=params, timeout=30)
-        response.raise_for_status()
+        response.raise_for_status() # Lanza un error si la petición HTTP falla
         data = response.json()
 
-        # --- VERIFICACIÓN DE SEGURIDAD (AQUÍ ESTÁ LA CORRECCIÓN) ---
         # Verificamos que la respuesta contenga la estructura de datos que esperamos
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
@@ -386,7 +391,6 @@ def get_pvgis_hsp(lat, lon):
         if not monthly_data:
             st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
             return None
-        # --- FIN DE LA VERIFICACIÓN ---
         
         monthly_totals = [[] for _ in range(12)]
         for entry in monthly_data:
@@ -401,7 +405,9 @@ def get_pvgis_hsp(lat, lon):
         return hsp_mensual
         
     except requests.exceptions.RequestException as e:
-        st.error(f"Error al conectar con la base de datos de PVGIS: {e}")
+        st.error(f"Error de red al conectar con PVGIS. Verifica tu conexión.")
+        # Opcional: mostrar más detalles técnicos si es necesario
+        # st.error(f"Detalles: {e}")
         return None
     except Exception as e:
         st.error(f"Error al procesar los datos de PVGIS: {e}")
@@ -757,6 +763,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
