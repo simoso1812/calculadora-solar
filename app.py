@@ -353,8 +353,8 @@ def main():
     st.markdown(
         """
         <style>
-        [data-testid="stSidebar"] {
-            width: 600px;
+        section[data-testid="stSidebar"] {
+            width: 450px !important; /* Ancho deseado con !important */
         }
         </style>
         """,
@@ -657,6 +657,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
