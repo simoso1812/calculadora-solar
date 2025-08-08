@@ -369,7 +369,6 @@ def get_pvgis_hsp(lat, lon):
     Se conecta al endpoint correcto de PVGIS (MRcalc) para obtener el HSP mensual.
     """
     try:
-        # CORRECCIÓN: Usamos el endpoint 'MRcalc' para radiación mensual
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
         
         params = {
@@ -377,14 +376,14 @@ def get_pvgis_hsp(lat, lon):
             'lon': lon,
             'horirrad': 1, # Pedimos la irradiación horizontal promedio diaria
             'outputformat': 'json',
-            'raddatabase': 'PVGIS-NSRDB' # Base de datos para las Américas
+            # --- PARÁMETRO 'raddatabase' ELIMINADO ---
+            # Dejamos que PVGIS elija la mejor base de datos por defecto.
         }
         
         response = requests.get(api_url, params=params, timeout=30)
-        response.raise_for_status() # Lanza un error si la respuesta es 4xx o 5xx
+        response.raise_for_status()
         data = response.json()
 
-        # Verificamos que la respuesta contenga la estructura de datos que esperamos
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
 
@@ -392,7 +391,6 @@ def get_pvgis_hsp(lat, lon):
             st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
             return None
         
-        # La respuesta de MRcalc es más simple, ya nos da el HSP diario: H(h)_d
         hsp_mensual = [month['H(h)_d'] for month in monthly_data]
         
         return hsp_mensual
@@ -754,6 +752,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
