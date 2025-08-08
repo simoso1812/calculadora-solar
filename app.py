@@ -447,11 +447,12 @@ def main():
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
     # --- INICIALIZACIÓN DE CREDENCIALES Y CONSECUTIVO DE PROYECTO ---
+   
     drive_service = None
     numero_proyecto_del_año = 1
-    parent_folder_id = None # Inicializamos la variable
+    parent_folder_id = None 
     try:
-        # Estas líneas DEBEN estar indentadas (con espacios al principio)
+        # Estas líneas DEBEN estar indentadas
         creds = Credentials(
             None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
             token_uri='https://oauth2.googleapis.com/token',
@@ -462,7 +463,6 @@ def main():
         drive_service = build('drive', 'v3', credentials=creds)
         parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
         
-        # Verificamos que parent_folder_id no sea nulo antes de usarlo
         if parent_folder_id:
             numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
         else:
@@ -761,6 +761,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
