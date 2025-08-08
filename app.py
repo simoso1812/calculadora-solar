@@ -438,7 +438,7 @@ def main():
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
-         st.subheader("Ubicación Geográfica")
+        st.subheader("Ubicación Geográfica")
 
         # 1. Inicializamos el estado del mapa en la memoria si no existe
         if "map_state" not in st.session_state:
@@ -717,6 +717,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
