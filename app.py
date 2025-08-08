@@ -354,7 +354,7 @@ def main():
         """
         <style>
         [data-testid="stSidebar"] {
-            width: 450px;
+            width: 600px;
         }
         </style>
         """,
@@ -362,7 +362,6 @@ def main():
     )
     # =======================================================
 
-    st.title("☀️ Calculadora y Cotizador Solar Profesional")
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
     drive_service = None
@@ -658,6 +657,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
