@@ -384,25 +384,38 @@ def main():
         st.subheader("Información del Proyecto")
         st.subheader("Ubicación Geográfica")
 
-        # Coordenadas iniciales del mapa (centro de Colombia)
-        map_center = [4.5709, -74.2973]
+        # Inicializamos las coordenadas en la memoria de la sesión si no existen
+        if 'clicked_coords' not in st.session_state:
+            st.session_state.clicked_coords = None
+
+        # Coordenadas para centrar el mapa. Usamos las guardadas si existen, si no, el centro de Colombia.
+        map_center = st.session_state.clicked_coords if st.session_state.clicked_coords else [4.5709, -74.2973]
         
         # Crear el objeto de mapa
         m = folium.Map(location=map_center, zoom_start=6)
+
+        # Si hay coordenadas guardadas, añadimos un marcador rojo
+        if st.session_state.clicked_coords:
+            folium.Marker(
+                location=st.session_state.clicked_coords,
+                popup="Ubicación del Proyecto",
+                icon=folium.Icon(color="red", icon="info-sign"),
+            ).add_to(m)
         
         # Mostrar el mapa en la app y capturar interacciones
-        map_data = st_folium(m, width=700, height=400)
+        map_data = st_folium(m, width=700, height=400, key="folium_map")
         
-        # Procesar y mostrar las coordenadas del último clic
-        latitud, longitud = None, None
+        # Si el usuario hace un nuevo clic, actualizamos las coordenadas en la memoria
         if map_data and map_data["last_clicked"]:
-            latitud = map_data["last_clicked"]["lat"]
-            longitud = map_data["last_clicked"]["lng"]
-            st.write(f"**Coordenadas Seleccionadas:**")
-            st.write(f"Latitud: `{latitud:.6f}` | Longitud: `{longitud:.6f}`")
+            st.session_state.clicked_coords = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
+
+        # Procesar y mostrar las coordenadas seleccionadas
+        if st.session_state.clicked_coords:
+            lat, lon = st.session_state.clicked_coords
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.6f}` | Long: `{lon:.6f}`")
+            # Aquí la lógica para usar estas coordenadas ya está implementada
         else:
             st.info("👈 Haz clic en el mapa para seleccionar la ubicación exacta del proyecto.")
-        # =======================================================
 
         opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True)
         
@@ -657,6 +670,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
