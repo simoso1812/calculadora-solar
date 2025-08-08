@@ -477,24 +477,13 @@ def main():
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
         st.subheader("Ubicación Geográfica")
-
-        # --- INICIALIZACIÓN DEL CLIENTE DE GOOGLE MAPS ---
         gmaps = None
         try:
-            api_key = os.environ.get("Maps_API_KEY")
-            if not api_key:
-                # Si la variable de entorno no existe o está vacía, lo indicamos.
-                st.warning("API Key de Google Maps no encontrada en las variables de entorno.")
-            else:
-                gmaps = googlemaps.Client(key=api_key)
+            gmaps = googlemaps.Client(key=os.environ.get("Maps_API_KEY"))
         except Exception as e:
-            # Mostramos el error técnico real que ocurre al intentar usar la clave.
-            st.error(f"Error al inicializar Google Maps. Verifica la API Key y sus permisos. Error: {e}")
+            st.warning(f"API Key de Google Maps no configurada o inválida. La búsqueda está desactivada. Error: {e}")
 
-
-        # --- BARRA DE BÚSQUEDA CON BOTÓN ---
         address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
-        
         if st.button("Buscar Dirección"):
             if address and gmaps:
                 with st.spinner("Buscando dirección..."):
@@ -502,7 +491,6 @@ def main():
                     if geocode_result:
                         location = geocode_result[0]['geometry']['location']
                         coords = [location['lat'], location['lng']]
-                        # Actualizamos el estado del mapa
                         st.session_state.map_state["marker"] = coords
                         st.session_state.map_state["center"] = coords
                         st.session_state.map_state["zoom"] = 16
@@ -512,46 +500,43 @@ def main():
             elif not address:
                 st.warning("Por favor, ingresa una dirección para buscar.")
 
-        # --- LÓGICA DEL MAPA INTERACTIVO ---
         if "map_state" not in st.session_state:
             st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
 
         m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
         if st.session_state.map_state["marker"]:
             folium.Marker(location=st.session_state.map_state["marker"], popup="Ubicación del Proyecto", icon=folium.Icon(color="red")).add_to(m)
-        
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
-        
         if map_data and map_data["last_clicked"]:
             st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
             st.rerun()
 
-        # --- LÓGICA PARA OBTENER HSP Y MOSTRAR COORDENADAS ---
         hsp_mensual_calculado = None
+        latitud, longitud = None, None
         if st.session_state.map_state["marker"]:
-            lat, lon = st.session_state.map_state["marker"]
-            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.6f}` | Long: `{lon:.6f}`")
-            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (lat, lon):
+            latitud, longitud = st.session_state.map_state["marker"]
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{latitud:.6f}` | Long: `{longitud:.6f}`")
+            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
                 with st.spinner("Consultando base de datos satelital (PVGIS)..."):
-                    st.session_state.pvgis_data = get_pvgis_hsp(lat, lon)
-                    st.session_state.last_coords = (lat, lon)
+                    st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
+                    st.session_state.last_coords = (latitud, longitud)
             hsp_mensual_calculado = st.session_state.pvgis_data
             if hsp_mensual_calculado:
                 st.success("✅ Datos de HSP obtenidos de PVGIS.")
                 promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
                 st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
         else:
-            st.info("👈 Escribe una dirección y haz clic en 'Buscar' o haz clic directamente en el mapa.")
+            st.info("👈 Escribe una dirección, busca, o haz clic directamente en el mapa.")
 
         ciudad_input = st.selectbox("Ciudad (usada como respaldo)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
         if hsp_mensual_calculado:
             hsp_a_usar = hsp_mensual_calculado
-            ciudad_para_calculo = f"Coord. ({latitud:.2f}, {longitud:.2f})" # Ahora 'latitud' siempre existe
+            ciudad_para_calculo = f"Coord. ({latitud:.2f}, {longitud:.2f})"
         else:
             hsp_a_usar = HSP_MENSUAL_POR_CIUDAD[ciudad_input]
             ciudad_para_calculo = ciudad_input
-
+        
         opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True, key="metodo_dimensionamiento")
 
         if opcion == "Por Consumo Mensual (kWh)":
@@ -762,6 +747,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
