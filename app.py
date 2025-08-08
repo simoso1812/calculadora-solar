@@ -211,13 +211,38 @@ class PropuestaPDF(FPDF):
 
     def crear_portada(self):
         self.add_page()
-        self.set_font('Arial', 'B', 24)
-        self.cell(0, 100, '', 0, 1)
-        self.cell(0, 10, 'Propuesta Comercial Detallada', 0, 1, 'C')
-        self.ln(20)
-        self.set_font('Arial', 'I', 16)
-        self.cell(0, 10, f'Para: {self.client_name}', 0, 1, 'C')
-        self.cell(0, 10, f'Proyecto: {self.project_name}', 0, 1, 'C')
+        
+        # 1. Imagen de fondo (cubre toda la página A4: 210mm x 297mm)
+        try:
+            self.image('background.jpg', x=0, y=0, w=210)
+        except RuntimeError:
+            st.warning("Advertencia: No se encontró 'background.jpg'. La portada no tendrá fondo.")
+
+        # 2. Logo en la parte superior (usamos el logo blanco sobre el fondo)
+        try:
+            self.image('LogoBlanco.png', x=15, y=20, w=60)
+        except RuntimeError:
+            st.warning("Advertencia: No se encontró 'LogoBlanco.png'.")
+
+        # 3. Título principal de la propuesta
+        self.set_y(120)
+        self.set_font('Arial', 'B', 28)
+        self.set_text_color(255, 255, 255) # Texto blanco para que contraste
+        self.multi_cell(0, 15, 'Propuesta Comercial\nSistema Solar Fotovoltaico', 0, 'C')
+
+        # 4. Datos del cliente y fecha en la parte inferior
+        self.set_y(250)
+        self.set_font('Arial', '', 11)
+        
+        # Celda para alinear el bloque de texto
+        self.cell(20) # Margen izquierdo de 20mm
+        # Contenedor de 150mm de ancho para los datos
+        with self.table(width=150, align='L') as table:
+            row = table.row()
+            row.cell(f"Para: {self.client_name}")
+            row.cell(f"Fecha: {self.fecha_propuesta.strftime('%d/%m/%Y')}", align='R')
+            row = table.row()
+            row.cell(f"Proyecto: {self.project_name}")
 
     def crear_resumen_ejecutivo(self, datos):
         self.add_page()
@@ -747,6 +772,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
