@@ -366,39 +366,35 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta a la API de PVGIS, obtiene los datos de radiación mensual
-    históricos, los promedia y calcula el HSP diario para cada mes.
+    Se conecta a la API de PVGIS y procesa los datos de forma segura.
     """
     try:
-        # Usamos la API de series de tiempo para obtener datos históricos (ej. 2005-2020)
         api_url = 'https://re.jrc.ec.europa.eu/api/seriescalc'
-        
         params = {
-            'lat': lat,
-            'lon': lon,
-            'startyear': 2005,
-            'endyear': 2020,
-            'outputformat': 'json',
-            'browser': 0
+            'lat': lat, 'lon': lon, 'startyear': 2005, 'endyear': 2020,
+            'outputformat': 'json', 'browser': 0
         }
-        
         response = requests.get(api_url, params=params, timeout=30)
         response.raise_for_status()
         data = response.json()
 
-        # --- Procesamiento de Datos ---
-        monthly_data = data['outputs']['monthly']
+        # --- VERIFICACIÓN DE SEGURIDAD (AQUÍ ESTÁ LA CORRECCIÓN) ---
+        # Verificamos que la respuesta contenga la estructura de datos que esperamos
+        outputs = data.get('outputs', {})
+        monthly_data = outputs.get('monthly', [])
+
+        if not monthly_data:
+            st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
+            return None
+        # --- FIN DE LA VERIFICACIÓN ---
         
-        # Agrupamos la radiación por mes (ej. todos los eneros juntos)
         monthly_totals = [[] for _ in range(12)]
         for entry in monthly_data:
             month_index = entry['month'] - 1
             monthly_totals[month_index].append(entry['H(h)_m'])
             
-        # Calculamos el promedio a largo plazo para cada mes
         long_term_monthly_avg = [np.mean(month_data) for month_data in monthly_totals]
         
-        # Convertimos el total mensual a promedio diario (HSP)
         dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         hsp_mensual = [total / dias for total, dias in zip(long_term_monthly_avg, dias_por_mes)]
         
@@ -761,6 +757,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
