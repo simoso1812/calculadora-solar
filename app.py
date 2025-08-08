@@ -13,6 +13,8 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import math
 import pandas as pd
+import folium
+from streamlit_folium import st_folium
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
@@ -368,6 +370,30 @@ def main():
     with st.sidebar:
         st.header("Parámetros de Entrada")
         st.subheader("Información del Proyecto")
+        st.subheader("Ubicación Geográfica")
+
+        # Coordenadas iniciales del mapa (centro de Colombia)
+        map_center = [4.5709, -74.2973]
+        
+        # Crear el objeto de mapa
+        m = folium.Map(location=map_center, zoom_start=6)
+        
+        # Mostrar el mapa en la app y capturar interacciones
+        map_data = st_folium(m, width=700, height=400)
+        
+        # Procesar y mostrar las coordenadas del último clic
+        latitud, longitud = None, None
+        if map_data and map_data["last_clicked"]:
+            latitud = map_data["last_clicked"]["lat"]
+            longitud = map_data["last_clicked"]["lng"]
+            st.write(f"**Coordenadas Seleccionadas:**")
+            st.write(f"Latitud: `{latitud:.6f}` | Longitud: `{longitud:.6f}`")
+        else:
+            st.info("👈 Haz clic en el mapa para seleccionar la ubicación exacta del proyecto.")
+        # =======================================================
+
+        opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True)
+        
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
@@ -616,6 +642,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
