@@ -9,3 +9,4 @@ google-auth-oauthlib
 pandas
 folium
 streamlit-folium
+requests
