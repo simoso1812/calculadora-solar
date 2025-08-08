@@ -516,7 +516,7 @@ def main():
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
         
         if map_data and map_data["last_clicked"]:
-            st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"}, map_data["last_clicked"]["lng"]]
+            st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
             st.rerun()
 
         # --- LÓGICA PARA OBTENER HSP Y MOSTRAR COORDENADAS ---
@@ -755,6 +755,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
