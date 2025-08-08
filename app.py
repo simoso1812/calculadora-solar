@@ -366,33 +366,51 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta a la API de PVGIS para obtener los datos de HSP mensuales
-    para una latitud y longitud específicas.
+    Se conecta a la API de PVGIS, obtiene los datos de radiación mensual
+    históricos, los promedia y calcula el HSP diario para cada mes.
     """
     try:
-        # URL del API de PVGIS para obtener datos de radiación mensual
-        api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
+        # Usamos la API de series de tiempo para obtener datos históricos (ej. 2005-2020)
+        api_url = 'https://re.jrc.ec.europa.eu/api/seriescalc'
         
         params = {
             'lat': lat,
             'lon': lon,
-            'horirrad': 1, # Pide la irradiación horizontal global
-            'outputformat': 'json'
+            'startyear': 2005,
+            'endyear': 2020,
+            'outputformat': 'json',
+            'browser': 0
         }
         
         response = requests.get(api_url, params=params, timeout=30)
-        response.raise_for_status() # Lanza un error si la petición falla
-        
+        response.raise_for_status()
         data = response.json()
+
+        # --- Procesamiento de Datos ---
+        monthly_data = data['outputs']['monthly']
         
-        # Extraer los valores de HSP (kWh/m²/día) para cada mes
-        hsp_mensual = [month['H(h)_d'] for month in data['outputs']['monthly']['months']]
+        # Agrupamos la radiación por mes (ej. todos los eneros juntos)
+        monthly_totals = [[] for _ in range(12)]
+        for entry in monthly_data:
+            month_index = entry['month'] - 1
+            monthly_totals[month_index].append(entry['H(h)_m'])
+            
+        # Calculamos el promedio a largo plazo para cada mes
+        long_term_monthly_avg = [np.mean(month_data) for month_data in monthly_totals]
+        
+        # Convertimos el total mensual a promedio diario (HSP)
+        dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        hsp_mensual = [total / dias for total, dias in zip(long_term_monthly_avg, dias_por_mes)]
         
         return hsp_mensual
         
     except requests.exceptions.RequestException as e:
         st.error(f"Error al conectar con la base de datos de PVGIS: {e}")
         return None
+    except Exception as e:
+        st.error(f"Error al procesar los datos de PVGIS: {e}")
+        return None
+
 
 def get_coords_from_address(address):
     """Convierte una dirección de texto en coordenadas (lat, lon)."""
@@ -734,6 +752,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
