@@ -438,14 +438,12 @@ def main():
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
-        st.subheader("Ubicación Geográfica")
+         st.subheader("Ubicación Geográfica")
 
         # 1. Inicializamos el estado del mapa en la memoria si no existe
         if "map_state" not in st.session_state:
             st.session_state.map_state = {
-                "center": [4.5709, -74.2973], # Centro de Colombia
-                "zoom": 6,
-                "marker": None # No hay marcador al inicio
+                "center": [4.5709, -74.2973], "zoom": 6, "marker": None
             }
 
         # 2. Creamos el mapa usando el estado guardado en la memoria
@@ -462,35 +460,36 @@ def main():
                 icon=folium.Icon(color="red", icon="info-sign"),
             ).add_to(m)
         
-        # 3. Mostramos el mapa y capturamos su estado actual
+        # 3. Mostramos el mapa
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
         
-        # 4. Actualizamos la memoria con el estado más reciente del mapa
+        # 4. Actualizamos la memoria, AHORA CON VERIFICACIONES DE SEGURIDAD
         if map_data:
-            # =======================================================
-            # LÍNEA CORREGIDA: Nos aseguramos de guardar el centro como una lista [lat, lng]
-            st.session_state.map_state["center"] = [map_data["center"]["lat"], map_data["center"]["lng"]]
-            # =======================================================
-            st.session_state.map_state["zoom"] = map_data["zoom"]
+            # Verificamos si la clave 'center' existe antes de usarla
+            if map_data.get("center"):
+                st.session_state.map_state["center"] = [map_data["center"]["lat"], map_data["center"]["lng"]]
             
-            # Si hubo un clic, actualizamos la posición del marcador
-            if map_data["last_clicked"]:
+            # Verificamos si la clave 'zoom' existe antes de usarla
+            if map_data.get("zoom"):
+                st.session_state.map_state["zoom"] = map_data["zoom"]
+            
+            # Verificamos si hubo un clic
+            if map_data.get("last_clicked"):
                 st.session_state.map_state["marker"] = [
                     map_data["last_clicked"]["lat"],
                     map_data["last_clicked"]["lng"]
                 ]
                 st.rerun()
 
-        # Lógica para obtener HSP y mostrar coordenadas
+        # --- Lógica para usar las coordenadas (sin cambios) ---
         hsp_mensual_calculado = None
-        latitud, longitud = None, None
         if st.session_state.map_state["marker"]:
-            latitud, longitud = st.session_state.map_state["marker"]
-            st.write(f"**Coordenadas Seleccionadas:** Lat: `{latitud:.6f}` | Long: `{longitud:.6f}`")
-            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
+            lat, lon = st.session_state.map_state["marker"]
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.6f}` | Long: `{lon:.6f}`")
+            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (lat, lon):
                 with st.spinner("Consultando base de datos satelital (PVGIS)..."):
-                    st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
-                    st.session_state.last_coords = (latitud, longitud)
+                    st.session_state.pvgis_data = get_pvgis_hsp(lat, lon)
+                    st.session_state.last_coords = (lat, lon)
             hsp_mensual_calculado = st.session_state.pvgis_data
             if hsp_mensual_calculado:
                 st.success("✅ Datos de HSP obtenidos de PVGIS.")
@@ -718,6 +717,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
