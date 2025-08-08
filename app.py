@@ -398,7 +398,10 @@ def main():
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
-        opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True)
+        opcion = st.radio("Método para dimensionar:",
+                  ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"],
+                  horizontal=True,
+                  key="metodo_dimensionamiento")
 
         if opcion == "Por Consumo Mensual (kWh)":
             Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
@@ -642,6 +645,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
