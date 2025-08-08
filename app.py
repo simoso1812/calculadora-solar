@@ -111,7 +111,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     # Se asegura de tener la lista de HSP mensuales para el cálculo
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
     
-    n = 0.85
+    n = 0.75
     life = 25
     if clima.strip().upper() == "NUBE": n -= 0.05
     
@@ -747,6 +747,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
