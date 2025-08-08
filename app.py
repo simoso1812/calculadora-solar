@@ -458,43 +458,33 @@ def main():
         st.subheader("Ubicación Geográfica")
 
         # --- INICIALIZACIÓN DEL CLIENTE DE GOOGLE MAPS ---
+        gmaps = None
         try:
             gmaps = googlemaps.Client(key=st.secrets["Maps_API_KEY"])
         except Exception as e:
-            st.error("No se pudo inicializar Google Maps. Verifica la API Key en los secretos.")
-            gmaps = None
+            st.error("API Key de Google Maps no configurada. La búsqueda está desactivada.")
 
-        # --- BARRA DE BÚSQUEDA Y LÓGICA DE AUTOCOMPLETADO ---
-        search_query = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
+        # --- BARRA DE BÚSQUEDA CON BOTÓN ---
+        address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
         
-        suggestions = []
-        if gmaps and search_query:
-            # Obtenemos sugerencias de la API de Places
-            autocomplete_results = gmaps.places_autocomplete(
-                search_query,
-                components={'country': 'CO'}, # Filtra resultados a Colombia
-                language='es'
-            )
-            suggestions = [result['description'] for result in autocomplete_results]
-
-        # Si hay sugerencias, las mostramos en un selectbox
-        if suggestions:
-            selected_address = st.selectbox("Selecciona una dirección de la lista:", options=[""] + suggestions, index=0, key="address_select")
-            
-            # Si el usuario selecciona una dirección, la procesamos
-            if selected_address and gmaps:
-                with st.spinner("Obteniendo coordenadas..."):
-                    geocode_result = gmaps.geocode(selected_address)
+        if st.button("Buscar Dirección"):
+            if address and gmaps:
+                with st.spinner("Buscando dirección..."):
+                    geocode_result = gmaps.geocode(address, region='CO') # region='CO' da prioridad a Colombia
                     if geocode_result:
                         location = geocode_result[0]['geometry']['location']
                         coords = [location['lat'], location['lng']]
-                        # Actualizamos el estado del mapa con las coordenadas de la búsqueda
+                        # Actualizamos el estado del mapa
                         st.session_state.map_state["marker"] = coords
                         st.session_state.map_state["center"] = coords
                         st.session_state.map_state["zoom"] = 16
                         st.rerun()
+                    else:
+                        st.error("Dirección no encontrada.")
+            elif not address:
+                st.warning("Por favor, ingresa una dirección para buscar.")
 
-        # --- LÓGICA DEL MAPA INTERACTIVO (se mantiene casi igual) ---
+        # --- LÓGICA DEL MAPA INTERACTIVO (se mantiene igual) ---
         if "map_state" not in st.session_state:
             st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
 
@@ -523,7 +513,7 @@ def main():
                 promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
                 st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
         else:
-            st.info("👈 Escribe una dirección, selecciona de la lista o haz clic en el mapa.")
+            st.info("👈 Escribe una dirección y haz clic en 'Buscar' o haz clic directamente en el mapa.")
 
         ciudad_input = st.selectbox("Ciudad (usada si no se selecciona punto en el mapa)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
@@ -744,6 +734,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
