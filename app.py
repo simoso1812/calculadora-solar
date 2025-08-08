@@ -364,20 +364,19 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
     return lista_materiales
     
+# Reemplaza tu función get_pvgis_hsp con esta versión de depuración
+
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta al endpoint correcto de PVGIS (MRcalc) para obtener el HSP mensual.
+    Se conecta a PVGIS y muestra la respuesta para depuración.
     """
     try:
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
-        
         params = {
             'lat': lat,
             'lon': lon,
-            'horirrad': 1, # Pedimos la irradiación horizontal promedio diaria
+            'horirrad': 1,
             'outputformat': 'json',
-            # --- PARÁMETRO 'raddatabase' ELIMINADO ---
-            # Dejamos que PVGIS elija la mejor base de datos por defecto.
         }
         
         response = requests.get(api_url, params=params, timeout=30)
@@ -387,10 +386,18 @@ def get_pvgis_hsp(lat, lon):
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
 
+        # =============================================================
+        # LÍNEA DE DEPURACIÓN: Mostramos los datos mensuales que recibimos
+        # =============================================================
+        st.write("--- Datos Mensuales Recibidos de PVGIS (para depurar) ---")
+        st.json(monthly_data)
+        # =============================================================
+
         if not monthly_data:
             st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
             return None
         
+        # Esta línea seguirá fallando por ahora, pero nos permitirá ver la salida de depuración
         hsp_mensual = [month['H(h)_d'] for month in monthly_data]
         
         return hsp_mensual
@@ -401,7 +408,6 @@ def get_pvgis_hsp(lat, lon):
     except Exception as e:
         st.error(f"Error al procesar los datos de PVGIS: {e}")
         return None
-
 
 def get_coords_from_address(address):
     """Convierte una dirección de texto en coordenadas (lat, lon)."""
@@ -752,6 +758,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
