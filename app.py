@@ -15,6 +15,8 @@ import math
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
+import requests
+
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
@@ -84,13 +86,17 @@ def recomendar_inversor(size_kwp):
 
 # Reemplaza tu función cotizacion completa con esta versión
 
+# Reemplaza tu función cotizacion completa con esta versión final
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
+               hsp_lista=None,
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                tasa_degradacion=0, precio_excedentes=0,
                incluir_baterias=False, costo_kwh_bateria=0, 
                profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2):
     
-    HSP = HSP_POR_CIUDAD.get(ciudad.upper(), 4.5)
+    # Se asegura de tener la lista de HSP mensuales para el cálculo
+    hsp_mensual = hsp_lista if hsp_lista else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
+    
     n = 0.85
     life = 25
     if clima.strip().upper() == "NUBE": n -= 0.05
@@ -108,10 +114,8 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
 
     costo_bateria = 0
     capacidad_nominal_bateria = 0
-    # --- NUEVA LÓGICA DE DIMENSIONAMIENTO OFF-GRID ---
     if incluir_baterias:
         consumo_diario = Load / 30
-        # La batería debe soportar el consumo total por los días de autonomía
         capacidad_util_bateria = consumo_diario * dias_autonomia
         if profundidad_descarga > 0:
             capacidad_nominal_bateria = capacidad_util_bateria / profundidad_descarga
@@ -131,23 +135,24 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
         
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
     
-    cashflow_free, total_lifetime_generation, ahorro_anual_año1 = [], 0, 0
-    annual_generation_init = potencia_efectiva_calculo * HSP * n * 365
-    performance = [0.083, 0.080, 0.081, 0.084, 0.083, 0.080, 0.093, 0.091, 0.084, 0.084, 0.079, 0.079]
-    for i in range(life):
-        current_annual_generation = annual_generation_init * ((1 - tasa_degradacion) ** i)
-        total_lifetime_generation += current_annual_generation
-        ahorro_anual_total = 0
+    # --- LÓGICA DE CÁLCULO DE GENERACIÓN Y AHORRO CORREGIDA ---
+    cashflow_free = []
+    total_lifetime_generation = 0
+    ahorro_anual_año1 = 0
+    dias_por_mes = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
-        # --- NUEVA LÓGICA DE AHORRO OFF-GRID ---
+    # Se calcula la generación de cada mes individualmente usando los HSP mensuales
+    monthly_generation_init = [potencia_efectiva_calculo * hsp * dias * n for hsp, dias in zip(hsp_mensual, dias_por_mes)]
+    
+    for i in range(life):
+        current_monthly_generation = [gen * ((1 - tasa_degradacion) ** i) for gen in monthly_generation_init]
+        total_lifetime_generation += sum(current_monthly_generation)
+        
+        ahorro_anual_total = 0
         if incluir_baterias:
-            # En un sistema aislado, el ahorro es el 100% de la factura que se evita.
-            # Se asume que el sistema está bien dimensionado para cubrir el 100% del consumo.
             ahorro_anual_total = (Load * 12) * costkWh
-        else:
-            # Lógica para sistema conectado a la red (On-Grid)
-            for p in performance:
-                gen_mes = current_annual_generation * p
+        else: # Lógica On-Grid
+            for gen_mes in current_monthly_generation:
                 consumo_mes = Load
                 if gen_mes >= consumo_mes:
                     ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes)
@@ -168,12 +173,12 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     internal_rate = npf.irr(cashflow_free)
     lcoe = (desembolso_inicial_cliente + npf.npv(dRate, [0.05 * ahorro_anual_total * ((1 + index) ** i) for i in range(life)])) / total_lifetime_generation if total_lifetime_generation > 0 else 0
     trees = round(Load * 12 * 0.154 * 22 / 1000, 0)
-    monthly_generation_init = [annual_generation_init * p for p in performance]
 
+    # El return ahora devuelve la lista 'hsp_mensual' en lugar de un solo valor 'HSP'
     return valor_proyecto_total, size, monto_a_financiar, cuota_mensual_credito, \
            desembolso_inicial_cliente, cashflow_free, trees, monthly_generation_init, \
            present_value, internal_rate, quantity, life, recomendacion_inversor_str, \
-           lcoe, n, HSP, potencia_ac_inversor, ahorro_anual_año1, area_requerida, capacidad_nominal_bateria
+           lcoe, n, hsp_mensual, potencia_ac_inversor, ahorro_anual_año1, area_requerida, capacidad_nominal_bateria
 # ==============================================================================
 # CLASE PARA EL REPORTE PDF
 # ==============================================================================
@@ -344,6 +349,36 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     lista_materiales.update(materiales_montaje)
     
     return lista_materiales
+    
+def get_pvgis_hsp(lat, lon):
+    """
+    Se conecta a la API de PVGIS para obtener los datos de HSP mensuales
+    para una latitud y longitud específicas.
+    """
+    try:
+        # URL del API de PVGIS para obtener datos de radiación mensual
+        api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
+        
+        params = {
+            'lat': lat,
+            'lon': lon,
+            'horirrad': 1, # Pide la irradiación horizontal global
+            'outputformat': 'json'
+        }
+        
+        response = requests.get(api_url, params=params, timeout=30)
+        response.raise_for_status() # Lanza un error si la petición falla
+        
+        data = response.json()
+        
+        # Extraer los valores de HSP (kWh/m²/día) para cada mes
+        hsp_mensual = [month['H(h)_d'] for month in data['outputs']['monthly']['months']]
+        
+        return hsp_mensual
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error al conectar con la base de datos de PVGIS: {e}")
+        return None
 # ==============================================================================
 # INTERFAZ Y LÓGICA PRINCIPAL DE LA APLICACIÓN
 # ==============================================================================
@@ -422,6 +457,38 @@ def main():
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
+        st.subheader("Ubicación Geográfica")
+        map_center = [4.5709, -74.2973]
+        m = folium.Map(location=map_center, zoom_start=6)
+        map_data = st_folium(m, width=700, height=400)
+        
+        # --- NUEVA LÓGICA PARA HSP ---
+        hsp_mensual_calculado = None
+        if map_data and map_data["last_clicked"]:
+            lat = map_data["last_clicked"]["lat"]
+            lon = map_data["last_clicked"]["lng"]
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.4f}`, Lon: `{lon:.4f}`")
+            
+            with st.spinner("Consultando base de datos satelital de radiación (PVGIS)..."):
+                hsp_mensual_calculado = get_pvgis_hsp(lat, lon)
+            if hsp_mensual_calculado:
+                st.success("✅ Datos de HSP obtenidos de PVGIS.")
+        
+        # Selector de ciudad como respaldo si el mapa no se usa o falla la API
+        ciudad_input = st.selectbox(
+            "Ciudad (usada si no se selecciona punto en el mapa)", 
+            list(HSP_MENSUAL_POR_CIUDAD.keys())
+        )
+        
+        # Se decide qué HSP usar: el preciso de PVGIS o el promedio de la ciudad
+        if hsp_mensual_calculado:
+            hsp_a_usar = hsp_mensual_calculado
+            ciudad_para_calculo = f"Coord. ({lat:.2f}, {lon:.2f})"
+        else:
+            st.info("👈 Haz clic en el mapa para una cotización precisa o usa el promedio de la ciudad seleccionada.")
+            hsp_a_usar = HSP_MENSUAL_POR_CIUDAD[ciudad_input]
+            ciudad_para_calculo = ciudad_input
+
         
         opcion = st.radio("Método para dimensionar:",
                   ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"],
@@ -478,29 +545,29 @@ def main():
 
     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
+            # --- Generación del nombre del proyecto ---
             año_actual = str(datetime.datetime.now().year)[-2:]
             numero_formateado = f"{numero_proyecto_del_año:03d}"
             codigo_proyecto = f"FV{año_actual}{numero_formateado}"
             nombre_proyecto = f"{codigo_proyecto} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
             st.success(f"Proyecto Generado: {nombre_proyecto}")
 
+            # --- Llamada a la función de cálculo ---
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
-            tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, HSP_final, \
-            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_bateria_kwh = \
+            tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
+            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria = \
                 cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
-                           ciudad=ciudad_input, perc_financiamiento=perc_financiamiento, 
+                           ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                           perc_financiamiento=perc_financiamiento, 
                            tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años, 
                            tasa_degradacion=0.001, precio_excedentes=300.0,
-                           # Nuevos argumentos que se pasan a la función:
                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                            profundidad_descarga=profundidad_descarga / 100,
                            eficiencia_bateria=eficiencia_bateria / 100,
                            dias_autonomia=dias_autonomia)
-                           
             
-            
-            generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation)
+            generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
             payback_exacto = None
             if payback_simple is not None:
@@ -509,14 +576,19 @@ def main():
                 else:
                     payback_exacto = float(payback_simple)
 
+            # --- Mostrar Resultados en la App ---
             st.header("Resultados de la Propuesta")
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Valor del Proyecto", f"${valor_proyecto_total:,.0f}")
             col2.metric("TIR", f"{tasa_interna:.2%}")
             col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
-            col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
+            
+            # Mostrar métrica de batería si aplica
             if incluir_baterias:
-                col4.metric("Batería Recomendada", f"{capacidad_bateria_kwh:.1f} kWh")
+                col4.metric("Batería Recomendada", f"{capacidad_nominal_bateria:.1f} kWh")
+            else:
+                col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
+
             # --- SECCIÓN DE ANÁLISIS FINANCIERO INTERNO (DETALLADO Y REDONDEADO) ---
             with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
                 st.subheader("Desglose Basado en Promedios Históricos")
@@ -670,6 +742,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
