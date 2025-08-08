@@ -438,22 +438,47 @@ def main():
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
-        st.subheader("Ubicación Geográfica")
-        # Lógica de mapa robusta con session_state para recordar zoom, centro y marcador
-        if "map_state" not in st.session_state:
-            st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
+         st.subheader("Ubicación Geográfica")
 
-        m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
+        # 1. Inicializamos el estado del mapa en la memoria si no existe
+        if "map_state" not in st.session_state:
+            st.session_state.map_state = {
+                "center": [4.5709, -74.2973], # Centro de Colombia
+                "zoom": 6,
+                "marker": None # No hay marcador al inicio
+            }
+
+        # 2. Creamos el mapa usando el estado guardado en la memoria
+        m = folium.Map(
+            location=st.session_state.map_state["center"], 
+            zoom_start=st.session_state.map_state["zoom"]
+        )
+
+        # Si hay un marcador guardado, lo añadimos al mapa
         if st.session_state.map_state["marker"]:
-            folium.Marker(location=st.session_state.map_state["marker"], popup="Ubicación del Proyecto", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
+            folium.Marker(
+                location=st.session_state.map_state["marker"],
+                popup="Ubicación del Proyecto",
+                icon=folium.Icon(color="red", icon="info-sign"),
+            ).add_to(m)
         
+        # 3. Mostramos el mapa y capturamos su estado actual
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
         
+        # 4. Actualizamos la memoria con el estado más reciente del mapa
         if map_data:
-            st.session_state.map_state["center"] = map_data["center"]
+            # =======================================================
+            # LÍNEA CORREGIDA: Nos aseguramos de guardar el centro como una lista [lat, lng]
+            st.session_state.map_state["center"] = [map_data["center"]["lat"], map_data["center"]["lng"]]
+            # =======================================================
             st.session_state.map_state["zoom"] = map_data["zoom"]
+            
+            # Si hubo un clic, actualizamos la posición del marcador
             if map_data["last_clicked"]:
-                st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
+                st.session_state.map_state["marker"] = [
+                    map_data["last_clicked"]["lat"],
+                    map_data["last_clicked"]["lng"]
+                ]
                 st.rerun()
 
         # Lógica para obtener HSP y mostrar coordenadas
@@ -693,6 +718,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
