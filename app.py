@@ -21,6 +21,17 @@ import requests
 # CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
 # Reemplaza el diccionario PROMEDIOS_COSTO en tu app.py con este
+HSP_MENSUAL_POR_CIUDAD = {
+    # Datos de HSP promedio mensual (kWh/m²/día)
+    # Fuente: PVGIS y promedios históricos de radiación solar.
+    "MEDELLIN":    [4.38, 4.49, 4.51, 4.31, 4.20, 4.35, 4.80, 4.71, 4.40, 4.15, 4.05, 4.19],
+    "BOGOTA":      [4.35, 4.48, 4.21, 3.89, 3.70, 3.81, 4.25, 4.30, 4.10, 3.95, 3.88, 4.15],
+    "CALI":        [4.80, 4.95, 4.85, 4.60, 4.50, 4.75, 5.10, 5.05, 4.80, 4.65, 4.55, 4.68],
+    "BARRANQUILLA":[5.10, 5.35, 5.80, 5.90, 5.75, 5.85, 5.95, 5.80, 5.45, 5.15, 4.90, 4.95],
+    "BUCARAMANGA": [4.60, 4.75, 4.50, 4.30, 4.15, 4.25, 4.70, 4.80, 4.65, 4.40, 4.30, 4.45],
+    "CARTAGENA":   [5.30, 5.60, 6.10, 6.20, 6.00, 6.15, 6.25, 6.10, 5.70, 5.40, 5.10, 5.15],
+    "PEREIRA":     [4.55, 4.68, 4.60, 4.40, 4.30, 4.45, 4.90, 4.85, 4.55, 4.35, 4.25, 4.40]
+}
 
 PROMEDIOS_COSTO = {
     'Equipos': 24.33,
@@ -742,6 +753,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
