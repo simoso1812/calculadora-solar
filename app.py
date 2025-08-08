@@ -481,9 +481,16 @@ def main():
         # --- INICIALIZACIÓN DEL CLIENTE DE GOOGLE MAPS ---
         gmaps = None
         try:
-            gmaps = googlemaps.Client(key=st.secrets["Maps_API_KEY"])
+            api_key = os.environ.get("Maps_API_KEY")
+            if not api_key:
+                # Si la variable de entorno no existe o está vacía, lo indicamos.
+                st.warning("API Key de Google Maps no encontrada en las variables de entorno.")
+            else:
+                gmaps = googlemaps.Client(key=api_key)
         except Exception as e:
-            st.error("API Key de Google Maps no configurada. La búsqueda está desactivada.")
+            # Mostramos el error técnico real que ocurre al intentar usar la clave.
+            st.error(f"Error al inicializar Google Maps. Verifica la API Key y sus permisos. Error: {e}")
+
 
         # --- BARRA DE BÚSQUEDA CON BOTÓN ---
         address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
@@ -755,6 +762,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
