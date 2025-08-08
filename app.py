@@ -366,7 +366,7 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta a la API de PVGIS especificando la base de datos para las Américas.
+    Se conecta a la API de PVGIS y procesa los datos de forma segura.
     """
     try:
         api_url = 'https://re.jrc.ec.europa.eu/api/seriescalc'
@@ -376,15 +376,13 @@ def get_pvgis_hsp(lat, lon):
             'startyear': 2005,
             'endyear': 2020,
             'outputformat': 'json',
-            # --- CAMBIO CLAVE: Especificamos la base de datos satelital ---
             'raddatabase': 'PVGIS-NSRDB'
         }
         
         response = requests.get(api_url, params=params, timeout=30)
-        response.raise_for_status() # Lanza un error si la petición HTTP falla
+        response.raise_for_status()
         data = response.json()
 
-        # Verificamos que la respuesta contenga la estructura de datos que esperamos
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
 
@@ -405,9 +403,11 @@ def get_pvgis_hsp(lat, lon):
         return hsp_mensual
         
     except requests.exceptions.RequestException as e:
-        st.error(f"Error de red al conectar con PVGIS. Verifica tu conexión.")
-        # Opcional: mostrar más detalles técnicos si es necesario
-        # st.error(f"Detalles: {e}")
+        # =============================================================
+        # CAMBIO CLAVE: Mostramos el error de red detallado que nos da
+        # la librería 'requests'.
+        # =============================================================
+        st.error(f"Error de red al conectar con PVGIS: {e}")
         return None
     except Exception as e:
         st.error(f"Error al procesar los datos de PVGIS: {e}")
@@ -763,6 +763,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
