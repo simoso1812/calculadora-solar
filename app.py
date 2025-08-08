@@ -396,20 +396,22 @@ def get_pvgis_hsp(lat, lon):
 
 def main():
     st.set_page_config(page_title="Calculadora Solar", layout="wide", initial_sidebar_state="expanded")
+
+    # --- Bloque para anchar la barra lateral ---
     st.markdown(
         """
         <style>
         section[data-testid="stSidebar"] {
-            width: 450px !important; /* Ancho deseado con !important */
+            width: 450px !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    # =======================================================
 
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
+    # --- INICIALIZACIÓN DE CREDENCIALES Y CONSECUTIVO DE PROYECTO ---
     drive_service = None
     numero_proyecto_del_año = 1
     try:
@@ -425,86 +427,63 @@ def main():
     except Exception:
         st.warning("Secretos de Google Drive no configurados. La creación de carpetas está desactivada.")
 
+    # ==============================================================================
+    # INTERFAZ EN LA BARRA LATERAL (SIDEBAR)
+    # ==============================================================================
     with st.sidebar:
         st.header("Parámetros de Entrada")
+        
         st.subheader("Información del Proyecto")
-        st.subheader("Ubicación Geográfica")
-
-        # Inicializamos las coordenadas en la memoria de la sesión si no existen
-        if 'clicked_coords' not in st.session_state:
-            st.session_state.clicked_coords = None
-
-        # Coordenadas para centrar el mapa. Usamos las guardadas si existen, si no, el centro de Colombia.
-        map_center = st.session_state.clicked_coords if st.session_state.clicked_coords else [4.5709, -74.2973]
-        
-        # Crear el objeto de mapa
-        m = folium.Map(location=map_center, zoom_start=6)
-
-        # Si hay coordenadas guardadas, añadimos un marcador rojo
-        if st.session_state.clicked_coords:
-            folium.Marker(
-                location=st.session_state.clicked_coords,
-                popup="Ubicación del Proyecto",
-                icon=folium.Icon(color="red", icon="info-sign"),
-            ).add_to(m)
-        
-        # Mostrar el mapa en la app y capturar interacciones
-        map_data = st_folium(m, width=700, height=400, key="folium_map")
-        
-        # Si el usuario hace un nuevo clic, actualizamos las coordenadas en la memoria
-        if map_data and map_data["last_clicked"]:
-            st.session_state.clicked_coords = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
-
-        # Procesar y mostrar las coordenadas seleccionadas
-        if st.session_state.clicked_coords:
-            lat, lon = st.session_state.clicked_coords
-            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.6f}` | Long: `{lon:.6f}`")
-            # Aquí la lógica para usar estas coordenadas ya está implementada
-        else:
-            st.info("👈 Haz clic en el mapa para seleccionar la ubicación exacta del proyecto.")
-
-        opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True)
-        
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
         ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
-        st.subheader("Ubicación Geográfica")
-        map_center = [4.5709, -74.2973]
-        m = folium.Map(location=map_center, zoom_start=6)
-        map_data = st_folium(m, width=700, height=400)
         
-        # --- NUEVA LÓGICA PARA HSP ---
+        st.subheader("Ubicación Geográfica")
+        # Lógica de mapa robusta con session_state para recordar zoom, centro y marcador
+        if "map_state" not in st.session_state:
+            st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
+
+        m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
+        if st.session_state.map_state["marker"]:
+            folium.Marker(location=st.session_state.map_state["marker"], popup="Ubicación del Proyecto", icon=folium.Icon(color="red", icon="info-sign")).add_to(m)
+        
+        map_data = st_folium(m, width=700, height=400, key="folium_map_main")
+        
+        if map_data:
+            st.session_state.map_state["center"] = map_data["center"]
+            st.session_state.map_state["zoom"] = map_data["zoom"]
+            if map_data["last_clicked"]:
+                st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
+                st.rerun()
+
+        # Lógica para obtener HSP y mostrar coordenadas
         hsp_mensual_calculado = None
-        if map_data and map_data["last_clicked"]:
-            lat = map_data["last_clicked"]["lat"]
-            lon = map_data["last_clicked"]["lng"]
-            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.4f}`, Lon: `{lon:.4f}`")
-            
-            with st.spinner("Consultando base de datos satelital de radiación (PVGIS)..."):
-                hsp_mensual_calculado = get_pvgis_hsp(lat, lon)
+        latitud, longitud = None, None
+        if st.session_state.map_state["marker"]:
+            latitud, longitud = st.session_state.map_state["marker"]
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{latitud:.6f}` | Long: `{longitud:.6f}`")
+            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
+                with st.spinner("Consultando base de datos satelital (PVGIS)..."):
+                    st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
+                    st.session_state.last_coords = (latitud, longitud)
+            hsp_mensual_calculado = st.session_state.pvgis_data
             if hsp_mensual_calculado:
                 st.success("✅ Datos de HSP obtenidos de PVGIS.")
+                promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
+                st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
+        else:
+            st.info("👈 Haz clic en el mapa para seleccionar la ubicación exacta del proyecto.")
+
+        ciudad_input = st.selectbox("Ciudad (usada si no se selecciona punto en el mapa)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
-        # Selector de ciudad como respaldo si el mapa no se usa o falla la API
-        ciudad_input = st.selectbox(
-            "Ciudad (usada si no se selecciona punto en el mapa)", 
-            list(HSP_MENSUAL_POR_CIUDAD.keys())
-        )
-        
-        # Se decide qué HSP usar: el preciso de PVGIS o el promedio de la ciudad
         if hsp_mensual_calculado:
             hsp_a_usar = hsp_mensual_calculado
-            ciudad_para_calculo = f"Coord. ({lat:.2f}, {lon:.2f})"
+            ciudad_para_calculo = f"Coord. ({latitud:.2f}, {longitud:.2f})"
         else:
-            st.info("👈 Haz clic en el mapa para una cotización precisa o usa el promedio de la ciudad seleccionada.")
             hsp_a_usar = HSP_MENSUAL_POR_CIUDAD[ciudad_input]
             ciudad_para_calculo = ciudad_input
 
-        
-        opcion = st.radio("Método para dimensionar:",
-                  ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"],
-                  horizontal=True,
-                  key="metodo_dimensionamiento")
+        opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True, key="metodo_dimensionamiento")
 
         if opcion == "Por Consumo Mensual (kWh)":
             Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
@@ -522,7 +501,6 @@ def main():
             st.info(f"Sistema dimensionado: **{size:.2f} kWp**")
 
         st.subheader("Datos Generales")
-        ciudad_input = st.selectbox("Ciudad", list(HSP_POR_CIUDAD.keys()))
         cubierta = st.selectbox("Tipo de cubierta", ["LÁMINA", "TEJA"])
         clima = st.selectbox("Clima predominante", ["SOL", "NUBE"])
 
@@ -538,45 +516,37 @@ def main():
             perc_financiamiento = st.slider("Porcentaje a financiar (%)", 0, 100, 70)
             tasa_interes_input = st.slider("Tasa de interés anual (%)", 0.0, 30.0, 15.0, 0.5)
             plazo_credito_años = st.number_input("Plazo del crédito (años)", 1, 20, 5)
-            
+        
         st.subheader("Almacenamiento (Baterías) - Modo Off-Grid")
         incluir_baterias = st.toggle("Añadir baterías (asumir sistema aislado)")
-        
-        costo_kwh_bateria = 0
-        profundidad_descarga = 90.0
-        eficiencia_bateria = 95.0
-        dias_autonomia = 1 # Valor por defecto
-
+        dias_autonomia = 2
         if incluir_baterias:
-            dias_autonomia = st.number_input("Días de autonomía deseados", min_value=1, max_value=7, value=2, step=1, help="Número de días que el sistema debe soportar el consumo sin sol.")
-            costo_kwh_bateria = st.number_input("Costo por kWh de batería (COP)", min_value=100000, value=2500000, step=100000)
-            profundidad_descarga = st.slider("Profundidad de Descarga (DoD) permitida (%)", 50.0, 100.0, 90.0, 0.5)
-            eficiencia_bateria = st.slider("Eficiencia de Carga/Descarga (%)", 80.0, 100.0, 95.0, 0.5)
+            dias_autonomia = st.number_input("Días de autonomía deseados", 1, 7, 2, help="Días que el sistema debe soportar el consumo sin sol.")
+            costo_kwh_bateria = st.number_input("Costo por kWh de batería (COP)", 100000, 5000000, 2500000, 100000)
+            profundidad_descarga = st.slider("Profundidad de Descarga (DoD) (%)", 50.0, 100.0, 90.0, 0.5)
+            eficiencia_bateria = st.slider("Eficiencia Carga/Descarga (%)", 80.0, 100.0, 95.0, 0.5)
+        else:
+            costo_kwh_bateria, profundidad_descarga, eficiencia_bateria = 0, 0, 0
 
-
+    # ==============================================================================
+    # LÓGICA DE CÁLCULO Y VISUALIZACIÓN (AL PRESIONAR EL BOTÓN)
+    # ==============================================================================
     if st.button("📊 Calcular y Generar Reporte", use_container_width=True):
         with st.spinner('Realizando cálculos y creando archivos... ⏳'):
-            # --- Generación del nombre del proyecto ---
-            año_actual = str(datetime.datetime.now().year)[-2:]
-            numero_formateado = f"{numero_proyecto_del_año:03d}"
-            codigo_proyecto = f"FV{año_actual}{numero_formateado}"
-            nombre_proyecto = f"{codigo_proyecto} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
+            nombre_proyecto = f"FV{str(datetime.datetime.now().year)[-2:]}{numero_proyecto_del_año:03d} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
             st.success(f"Proyecto Generado: {nombre_proyecto}")
 
-            # --- Llamada a la función de cálculo ---
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
             potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria = \
                 cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
                            ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
-                           perc_financiamiento=perc_financiamiento, 
-                           tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años, 
-                           tasa_degradacion=0.001, precio_excedentes=300.0,
+                           perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100, 
+                           plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                            profundidad_descarga=profundidad_descarga / 100,
-                           eficiencia_bateria=eficiencia_bateria / 100,
-                           dias_autonomia=dias_autonomia)
+                           eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia)
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
@@ -587,71 +557,41 @@ def main():
                 else:
                     payback_exacto = float(payback_simple)
 
-            # --- Mostrar Resultados en la App ---
             st.header("Resultados de la Propuesta")
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Valor del Proyecto", f"${valor_proyecto_total:,.0f}")
             col2.metric("TIR", f"{tasa_interna:.2%}")
             col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
-            
-            # Mostrar métrica de batería si aplica
             if incluir_baterias:
                 col4.metric("Batería Recomendada", f"{capacidad_nominal_bateria:.1f} kWh")
             else:
                 col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
 
-            # --- SECCIÓN DE ANÁLISIS FINANCIERO INTERNO (DETALLADO Y REDONDEADO) ---
             with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
                 st.subheader("Desglose Basado en Promedios Históricos")
-                
-                # Usamos los promedios para calcular el presupuesto guía detallado
                 presupuesto_equipos = valor_proyecto_total * (PROMEDIOS_COSTO['Equipos'] / 100)
                 presupuesto_materiales = valor_proyecto_total * (PROMEDIOS_COSTO['Materiales'] / 100)
                 provision_iva_guia = valor_proyecto_total * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
                 ganancia_estimada_guia = valor_proyecto_total * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
-                
-                st.info(f"""
-                Basado en el **Valor Total del Proyecto de ${valor_proyecto_total:,.0f} COP**, el presupuesto guía según tu historial es:
-                """)
-
+                st.info(f"""Basado en el **Valor Total del Proyecto de ${valor_proyecto_total:,.0f} COP**, el presupuesto guía según tu historial es:""")
                 col_guia1, col_guia2, col_guia3, col_guia4 = st.columns(4)
-                col_guia1.metric(
-                    label=f"Equipos ({PROMEDIOS_COSTO['Equipos']:.2f}%)",
-                    value=f"${math.ceil(presupuesto_equipos):,.0f}"
-                )
-                col_guia2.metric(
-                    label=f"Materiales ({PROMEDIOS_COSTO['Materiales']:.2f}%)",
-                    value=f"${math.ceil(presupuesto_materiales):,.0f}"
-                )
-                col_guia3.metric(
-                    label=f"Provisión IVA ({PROMEDIOS_COSTO['IVA (Impuestos)']:.2f}%)",
-                    value=f"${math.ceil(provision_iva_guia):,.0f}"
-                )
-                col_guia4.metric(
-                    label=f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)",
-                    value=f"${math.ceil(ganancia_estimada_guia):,.0f}"
-                )
-               
-                
+                col_guia1.metric(f"Equipos ({PROMEDIOS_COSTO['Equipos']:.2f}%)", f"${math.ceil(presupuesto_equipos):,.0f}")
+                col_guia2.metric(f"Materiales ({PROMEDIOS_COSTO['Materiales']:.2f}%)", f"${math.ceil(presupuesto_materiales):,.0f}")
+                col_guia3.metric(f"Provisión IVA ({PROMEDIOS_COSTO['IVA (Impuestos)']:.2f}%)", f"${math.ceil(provision_iva_guia):,.0f}")
+                col_guia4.metric(f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)", f"${math.ceil(ganancia_estimada_guia):,.0f}")
                 st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
+
             with st.expander("📋 Ver Lista de Materiales (Referencia Interna)"):
                 st.subheader("Materiales de Montaje Estimados")
-
-                # Llamamos a la nueva función con los resultados del cálculo
                 lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta, module, recomendacion_inversor)
-                
                 if lista_materiales:
-                    # Convertimos el diccionario a un formato más legible para la tabla
                     df_materiales = pd.DataFrame(lista_materiales.items(), columns=['Material', 'Cantidad Estimada'])
                     df_materiales.index = df_materiales.index + 1
                     st.table(df_materiales)
                 else:
                     st.write("No se calcularon materiales (cantidad de paneles es cero).")
-                
-                st.warning("Nota: Esta es una lista de referencia para montaje y no incluye todos los componentes eléctricos. Las cantidades incluyen un pequeño margen de emergencia.")
-
-
-            
+                st.warning("Nota: Esta es una lista de referencia y no incluye todos los componentes.")
+        
             st.header("Análisis Gráfico")
             
             # --- CÓDIGO DEL GRÁFICO 1 (GENERACIÓN VS CONSUMO) ---
@@ -753,6 +693,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
