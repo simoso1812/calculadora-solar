@@ -195,12 +195,18 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
 # ==============================================================================
 
 class PropuestaPDF(FPDF):
-    def __init__(self, client_name="Cliente", project_name="Proyecto", *args, **kwargs):
+    def __init__(self, client_name="Cliente", project_name="Proyecto", 
+                 documento="", direccion="", fecha="", *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # --- DATOS GUARDADOS AL CREAR EL OBJETO ---
         self.client_name = client_name
         self.project_name = project_name
+        self.documento_cliente = documento
+        self.direccion_proyecto = direccion
+        self.fecha_propuesta = fecha
 
-    def header(self): pass
+    def header(self):
+        pass
 
     def footer(self):
         self.set_y(-15)
@@ -772,6 +778,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
