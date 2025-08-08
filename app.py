@@ -450,17 +450,18 @@ def main():
     drive_service = None
     numero_proyecto_del_año = 1
     try:
-        # Leemos los secretos desde las variables de entorno del servidor (Render)
-        creds = Credentials(
-            None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
-            token_uri='https://oauth2.googleapis.com/token',
-            client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
-            scopes=['https://www.googleapis.com/auth/drive']
-        )
-        drive_service = build('drive', 'v3', credentials=creds)
-        parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
-        numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
-     except Exception:
+    # Leemos los secretos desde las variables de entorno del servidor (Render)
+    creds = Credentials(
+        None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
+        token_uri='https://oauth2.googleapis.com/token',
+        client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+        scopes=['https://www.googleapis.com/auth/drive']
+    )
+    drive_service = build('drive', 'v3', credentials=creds)
+    parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
+    numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
+except Exception:
+    #...
         st.warning("Secretos de Google Drive no configurados. La creación de carpetas está desactivada.")
 
     # ==============================================================================
@@ -753,6 +754,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
