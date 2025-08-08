@@ -109,7 +109,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
                profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2):
     
     # Se asegura de tener la lista de HSP mensuales para el cálculo
-    hsp_mensual = hsp_lista if hsp_lista else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
+    hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
     
     n = 0.85
     life = 25
@@ -149,11 +149,8 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
         
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
     
-    # --- LÓGICA DE CÁLCULO DE GENERACIÓN Y AHORRO CORREGIDA ---
-    cashflow_free = []
-    total_lifetime_generation = 0
-    ahorro_anual_año1 = 0
-    dias_por_mes = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    cashflow_free, total_lifetime_generation, ahorro_anual_año1 = [], 0, 0
+    dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
     # Se calcula la generación de cada mes individualmente usando los HSP mensuales
     monthly_generation_init = [potencia_efectiva_calculo * hsp * dias * n for hsp, dias in zip(hsp_mensual, dias_por_mes)]
@@ -188,7 +185,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     lcoe = (desembolso_inicial_cliente + npf.npv(dRate, [0.05 * ahorro_anual_total * ((1 + index) ** i) for i in range(life)])) / total_lifetime_generation if total_lifetime_generation > 0 else 0
     trees = round(Load * 12 * 0.154 * 22 / 1000, 0)
 
-    # El return ahora devuelve la lista 'hsp_mensual' en lugar de un solo valor 'HSP'
+    # Se devuelve la lista 'hsp_mensual' en lugar de un solo valor 'HSP'
     return valor_proyecto_total, size, monto_a_financiar, cuota_mensual_credito, \
            desembolso_inicial_cliente, cashflow_free, trees, monthly_generation_init, \
            present_value, internal_rate, quantity, life, recomendacion_inversor_str, \
@@ -758,6 +755,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
