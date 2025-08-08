@@ -16,8 +16,10 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 import requests
+import googlemaps
 from geopy.geocoders import Nominatim
 import time
+
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
@@ -455,24 +457,44 @@ def main():
         
         st.subheader("Ubicación Geográfica")
 
-        # --- BARRA DE BÚSQUEDA ---
-        address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta")
-        if st.button("Buscar"):
-            if address:
-                with st.spinner("Buscando dirección..."):
-                    coords = get_coords_from_address(address)
-                    if coords:
-                        # Si encontramos la dirección, actualizamos el estado del mapa
-                        st.session_state.map_state["marker"] = [coords[0], coords[1]]
-                        st.session_state.map_state["center"] = [coords[0], coords[1]]
-                        st.session_state.map_state["zoom"] = 16 # Zoom cercano
-                        st.rerun() # Recargamos para que el mapa se actualice
-                    else:
-                        st.error("Dirección no encontrada. Por favor, sé más específico o usa el mapa manualmente.")
-            else:
-                st.warning("Por favor, ingresa una dirección para buscar.")
+        # --- INICIALIZACIÓN DEL CLIENTE DE GOOGLE MAPS ---
+        try:
+            gmaps = googlemaps.Client(key=st.secrets["Maps_API_KEY"])
+        except Exception as e:
+            st.error("No se pudo inicializar Google Maps. Verifica la API Key en los secretos.")
+            gmaps = None
 
-        # --- LÓGICA DEL MAPA INTERACTIVO (ya la teníamos, pero la incluimos aquí) ---
+        # --- BARRA DE BÚSQUEDA Y LÓGICA DE AUTOCOMPLETADO ---
+        search_query = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
+        
+        suggestions = []
+        if gmaps and search_query:
+            # Obtenemos sugerencias de la API de Places
+            autocomplete_results = gmaps.places_autocomplete(
+                search_query,
+                components={'country': 'CO'}, # Filtra resultados a Colombia
+                language='es'
+            )
+            suggestions = [result['description'] for result in autocomplete_results]
+
+        # Si hay sugerencias, las mostramos en un selectbox
+        if suggestions:
+            selected_address = st.selectbox("Selecciona una dirección de la lista:", options=[""] + suggestions, index=0, key="address_select")
+            
+            # Si el usuario selecciona una dirección, la procesamos
+            if selected_address and gmaps:
+                with st.spinner("Obteniendo coordenadas..."):
+                    geocode_result = gmaps.geocode(selected_address)
+                    if geocode_result:
+                        location = geocode_result[0]['geometry']['location']
+                        coords = [location['lat'], location['lng']]
+                        # Actualizamos el estado del mapa con las coordenadas de la búsqueda
+                        st.session_state.map_state["marker"] = coords
+                        st.session_state.map_state["center"] = coords
+                        st.session_state.map_state["zoom"] = 16
+                        st.rerun()
+
+        # --- LÓGICA DEL MAPA INTERACTIVO (se mantiene casi igual) ---
         if "map_state" not in st.session_state:
             st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
 
@@ -483,7 +505,6 @@ def main():
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
         
         if map_data and map_data["last_clicked"]:
-            # Si se hace clic, se prioriza sobre la búsqueda
             st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
             st.rerun()
 
@@ -502,7 +523,7 @@ def main():
                 promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
                 st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
         else:
-            st.info("👈 Escribe una dirección y haz clic en 'Buscar' o haz clic en el mapa.")
+            st.info("👈 Escribe una dirección, selecciona de la lista o haz clic en el mapa.")
 
         ciudad_input = st.selectbox("Ciudad (usada si no se selecciona punto en el mapa)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
@@ -723,6 +744,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
