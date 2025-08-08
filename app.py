@@ -366,23 +366,25 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta a la API de PVGIS y procesa los datos de forma segura.
+    Se conecta al endpoint correcto de PVGIS (MRcalc) para obtener el HSP mensual.
     """
     try:
-        api_url = 'https://re.jrc.ec.europa.eu/api/seriescalc'
+        # CORRECCIÓN: Usamos el endpoint 'MRcalc' para radiación mensual
+        api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
+        
         params = {
             'lat': lat,
             'lon': lon,
-            'startyear': 2005,
-            'endyear': 2020,
+            'horirrad': 1, # Pedimos la irradiación horizontal promedio diaria
             'outputformat': 'json',
-            'raddatabase': 'PVGIS-NSRDB'
+            'raddatabase': 'PVGIS-NSRDB' # Base de datos para las Américas
         }
         
         response = requests.get(api_url, params=params, timeout=30)
-        response.raise_for_status()
+        response.raise_for_status() # Lanza un error si la respuesta es 4xx o 5xx
         data = response.json()
 
+        # Verificamos que la respuesta contenga la estructura de datos que esperamos
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
 
@@ -390,23 +392,12 @@ def get_pvgis_hsp(lat, lon):
             st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
             return None
         
-        monthly_totals = [[] for _ in range(12)]
-        for entry in monthly_data:
-            month_index = entry['month'] - 1
-            monthly_totals[month_index].append(entry['H(h)_m'])
-            
-        long_term_monthly_avg = [np.mean(month_data) for month_data in monthly_totals]
-        
-        dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-        hsp_mensual = [total / dias for total, dias in zip(long_term_monthly_avg, dias_por_mes)]
+        # La respuesta de MRcalc es más simple, ya nos da el HSP diario: H(h)_d
+        hsp_mensual = [month['H(h)_d'] for month in monthly_data]
         
         return hsp_mensual
         
     except requests.exceptions.RequestException as e:
-        # =============================================================
-        # CAMBIO CLAVE: Mostramos el error de red detallado que nos da
-        # la librería 'requests'.
-        # =============================================================
         st.error(f"Error de red al conectar con PVGIS: {e}")
         return None
     except Exception as e:
@@ -763,6 +754,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
