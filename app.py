@@ -449,20 +449,27 @@ def main():
     # --- INICIALIZACIÓN DE CREDENCIALES Y CONSECUTIVO DE PROYECTO ---
     drive_service = None
     numero_proyecto_del_año = 1
+    parent_folder_id = None # Inicializamos la variable
     try:
-    # Leemos los secretos desde las variables de entorno del servidor (Render)
-    creds = Credentials(
-        None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
-        token_uri='https://oauth2.googleapis.com/token',
-        client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
-        scopes=['https://www.googleapis.com/auth/drive']
-    )
-    drive_service = build('drive', 'v3', credentials=creds)
-    parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
-    numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
-except Exception:
-    #...
-        st.warning("Secretos de Google Drive no configurados. La creación de carpetas está desactivada.")
+        # Estas líneas DEBEN estar indentadas (con espacios al principio)
+        creds = Credentials(
+            None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=os.environ.get("GOOGLE_CLIENT_ID"), 
+            client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+            scopes=['https://www.googleapis.com/auth/drive']
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
+        parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
+        
+        # Verificamos que parent_folder_id no sea nulo antes de usarlo
+        if parent_folder_id:
+            numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
+        else:
+             st.warning("ID de la carpeta padre no encontrado en las variables de entorno.")
+
+    except Exception as e:
+        st.warning(f"Secretos de Google Drive no configurados o inválidos. La creación de carpetas está desactivada. Error: {e}")
 
     # ==============================================================================
     # INTERFAZ EN LA BARRA LATERAL (SIDEBAR)
@@ -754,6 +761,7 @@ except Exception:
 
 if __name__ == '__main__':
     main()
+
 
 
 
