@@ -16,7 +16,8 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 import requests
-
+from geopy.geocoders import Nominatim
+import time
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
 # ==============================================================================
@@ -390,6 +391,20 @@ def get_pvgis_hsp(lat, lon):
     except requests.exceptions.RequestException as e:
         st.error(f"Error al conectar con la base de datos de PVGIS: {e}")
         return None
+
+def get_coords_from_address(address):
+    """Convierte una dirección de texto en coordenadas (lat, lon)."""
+    try:
+        geolocator = Nominatim(user_agent="mirac_solar_calculator")
+        # El timeout es importante para no sobrecargar el servidor gratuito
+        location = geolocator.geocode(address, timeout=10)
+        if location:
+            return (location.latitude, location.longitude)
+        else:
+            return None
+    except Exception as e:
+        st.error(f"Error en la geocodificación: {e}")
+        return None
 # ==============================================================================
 # INTERFAZ Y LÓGICA PRINCIPAL DE LA APLICACIÓN
 # ==============================================================================
@@ -440,48 +455,39 @@ def main():
         
         st.subheader("Ubicación Geográfica")
 
-        # 1. Inicializamos el estado del mapa en la memoria si no existe
+        # --- BARRA DE BÚSQUEDA ---
+        address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta")
+        if st.button("Buscar"):
+            if address:
+                with st.spinner("Buscando dirección..."):
+                    coords = get_coords_from_address(address)
+                    if coords:
+                        # Si encontramos la dirección, actualizamos el estado del mapa
+                        st.session_state.map_state["marker"] = [coords[0], coords[1]]
+                        st.session_state.map_state["center"] = [coords[0], coords[1]]
+                        st.session_state.map_state["zoom"] = 16 # Zoom cercano
+                        st.rerun() # Recargamos para que el mapa se actualice
+                    else:
+                        st.error("Dirección no encontrada. Por favor, sé más específico o usa el mapa manualmente.")
+            else:
+                st.warning("Por favor, ingresa una dirección para buscar.")
+
+        # --- LÓGICA DEL MAPA INTERACTIVO (ya la teníamos, pero la incluimos aquí) ---
         if "map_state" not in st.session_state:
-            st.session_state.map_state = {
-                "center": [4.5709, -74.2973], "zoom": 6, "marker": None
-            }
+            st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
 
-        # 2. Creamos el mapa usando el estado guardado en la memoria
-        m = folium.Map(
-            location=st.session_state.map_state["center"], 
-            zoom_start=st.session_state.map_state["zoom"]
-        )
-
-        # Si hay un marcador guardado, lo añadimos al mapa
+        m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
         if st.session_state.map_state["marker"]:
-            folium.Marker(
-                location=st.session_state.map_state["marker"],
-                popup="Ubicación del Proyecto",
-                icon=folium.Icon(color="red", icon="info-sign"),
-            ).add_to(m)
+            folium.Marker(location=st.session_state.map_state["marker"], popup="Ubicación del Proyecto", icon=folium.Icon(color="red")).add_to(m)
         
-        # 3. Mostramos el mapa
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
         
-        # 4. Actualizamos la memoria, AHORA CON VERIFICACIONES DE SEGURIDAD
-        if map_data:
-            # Verificamos si la clave 'center' existe antes de usarla
-            if map_data.get("center"):
-                st.session_state.map_state["center"] = [map_data["center"]["lat"], map_data["center"]["lng"]]
-            
-            # Verificamos si la clave 'zoom' existe antes de usarla
-            if map_data.get("zoom"):
-                st.session_state.map_state["zoom"] = map_data["zoom"]
-            
-            # Verificamos si hubo un clic
-            if map_data.get("last_clicked"):
-                st.session_state.map_state["marker"] = [
-                    map_data["last_clicked"]["lat"],
-                    map_data["last_clicked"]["lng"]
-                ]
-                st.rerun()
+        if map_data and map_data["last_clicked"]:
+            # Si se hace clic, se prioriza sobre la búsqueda
+            st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
+            st.rerun()
 
-        # --- Lógica para usar las coordenadas (sin cambios) ---
+        # --- Lógica para obtener HSP (sin cambios) ---
         hsp_mensual_calculado = None
         if st.session_state.map_state["marker"]:
             lat, lon = st.session_state.map_state["marker"]
@@ -496,7 +502,7 @@ def main():
                 promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
                 st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
         else:
-            st.info("👈 Haz clic en el mapa para seleccionar la ubicación exacta del proyecto.")
+            st.info("👈 Escribe una dirección y haz clic en 'Buscar' o haz clic en el mapa.")
 
         ciudad_input = st.selectbox("Ciudad (usada si no se selecciona punto en el mapa)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
@@ -717,6 +723,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
