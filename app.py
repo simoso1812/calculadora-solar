@@ -368,7 +368,7 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
 
 def get_pvgis_hsp(lat, lon):
     """
-    Se conecta a PVGIS y muestra la respuesta para depuración.
+    Se conecta a PVGIS, obtiene la radiación total mensual y la convierte a HSP diario.
     """
     try:
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
@@ -386,19 +386,19 @@ def get_pvgis_hsp(lat, lon):
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
 
-        # =============================================================
-        # LÍNEA DE DEPURACIÓN: Mostramos los datos mensuales que recibimos
-        # =============================================================
-        st.write("--- Datos Mensuales Recibidos de PVGIS (para depurar) ---")
-        st.json(monthly_data)
-        # =============================================================
-
         if not monthly_data:
             st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
             return None
         
-        # Esta línea seguirá fallando por ahora, pero nos permitirá ver la salida de depuración
-        hsp_mensual = [month['H(h)_d'] for month in monthly_data]
+        # --- LÓGICA CORREGIDA ---
+        dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        
+        # Usamos la clave correcta 'H(h)_m' y la dividimos por los días del mes
+        # para obtener el promedio diario (HSP).
+        hsp_mensual = [
+            month['H(h)_m'] / dias_por_mes[month['month'] - 1] 
+            for month in monthly_data
+        ]
         
         return hsp_mensual
         
@@ -758,6 +758,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
