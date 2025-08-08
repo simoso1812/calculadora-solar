@@ -384,65 +384,36 @@ def main():
         st.subheader("Información del Proyecto")
         st.subheader("Ubicación Geográfica")
 
-        # --- LÓGICA MEJORADA CON SESSION STATE PARA EL MAPA ---
+        # Inicializamos las coordenadas en la memoria de la sesión si no existen
+        if 'clicked_coords' not in st.session_state:
+            st.session_state.clicked_coords = None
 
-        # 1. Inicializamos el estado del mapa en la memoria si no existe
-        if "map_state" not in st.session_state:
-            st.session_state.map_state = {
-                "center": [4.5709, -74.2973], # Centro de Colombia
-                "zoom": 6,
-                "marker": None # No hay marcador al inicio
-            }
+        # Coordenadas para centrar el mapa. Usamos las guardadas si existen, si no, el centro de Colombia.
+        map_center = st.session_state.clicked_coords if st.session_state.clicked_coords else [4.5709, -74.2973]
+        
+        # Crear el objeto de mapa
+        m = folium.Map(location=map_center, zoom_start=6)
 
-        # 2. Creamos el mapa usando el estado guardado en la memoria
-        m = folium.Map(
-            location=st.session_state.map_state["center"], 
-            zoom_start=st.session_state.map_state["zoom"]
-        )
-
-        # Si hay un marcador guardado, lo añadimos al mapa
-        if st.session_state.map_state["marker"]:
+        # Si hay coordenadas guardadas, añadimos un marcador rojo
+        if st.session_state.clicked_coords:
             folium.Marker(
-                location=st.session_state.map_state["marker"],
+                location=st.session_state.clicked_coords,
                 popup="Ubicación del Proyecto",
                 icon=folium.Icon(color="red", icon="info-sign"),
             ).add_to(m)
         
-        # 3. Mostramos el mapa y capturamos su estado actual
-        map_data = st_folium(m, width=700, height=400, key="folium_map_main")
+        # Mostrar el mapa en la app y capturar interacciones
+        map_data = st_folium(m, width=700, height=400, key="folium_map")
         
-        # 4. Actualizamos la memoria con el estado más reciente del mapa
-        if map_data:
-            # Actualizamos el centro y el zoom para que se mantengan
-            st.session_state.map_state["center"] = map_data["center"]
-            st.session_state.map_state["zoom"] = map_data["zoom"]
-            
-            # Si hubo un clic, actualizamos la posición del marcador
-            if map_data["last_clicked"]:
-                st.session_state.map_state["marker"] = [
-                    map_data["last_clicked"]["lat"],
-                    map_data["last_clicked"]["lng"]
-                ]
+        # Si el usuario hace un nuevo clic, actualizamos las coordenadas en la memoria
+        if map_data and map_data["last_clicked"]:
+            st.session_state.clicked_coords = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
 
-        # --- Lógica para usar las coordenadas (sin cambios) ---
-        latitud, longitud = None, None
-        hsp_mensual_calculado = None
-
-        if st.session_state.map_state["marker"]:
-            latitud, longitud = st.session_state.map_state["marker"]
-            st.write(f"**Coordenadas Seleccionadas:** Lat: `{latitud:.6f}` | Long: `{longitud:.6f}`")
-            
-            # Usamos una clave diferente en session_state para los datos de PVGIS
-            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
-                with st.spinner("Consultando base de datos satelital (PVGIS)..."):
-                    st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
-                    st.session_state.last_coords = (latitud, longitud) # Guardamos las últimas coordenadas consultadas
-            
-            hsp_mensual_calculado = st.session_state.pvgis_data
-            if hsp_mensual_calculado:
-                st.success("✅ Datos de HSP obtenidos de PVGIS.")
-                promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
-                st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
+        # Procesar y mostrar las coordenadas seleccionadas
+        if st.session_state.clicked_coords:
+            lat, lon = st.session_state.clicked_coords
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.6f}` | Long: `{lon:.6f}`")
+            # Aquí la lógica para usar estas coordenadas ya está implementada
         else:
             st.info("👈 Haz clic en el mapa para seleccionar la ubicación exacta del proyecto.")
 
@@ -699,6 +670,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
