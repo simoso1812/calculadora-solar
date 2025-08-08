@@ -350,6 +350,19 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
 
 def main():
     st.set_page_config(page_title="Calculadora Solar", layout="wide", initial_sidebar_state="expanded")
+    st.markdown(
+        """
+        <style>
+        [data-testid="stSidebar"] {
+            width: 450px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    # =======================================================
+
+    st.title("☀️ Calculadora y Cotizador Solar Profesional")
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
     drive_service = None
@@ -645,6 +658,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
