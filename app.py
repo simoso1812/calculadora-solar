@@ -478,34 +478,7 @@ def main():
         
         st.subheader("Ubicación Geográfica")
 
-        # --- INICIALIZACIÓN DEL CLIENTE DE GOOGLE MAPS ---
-        gmaps = None
-        try:
-            gmaps = googlemaps.Client(key=os.environ.get("Maps_API_KEY"))
-        except Exception as e:
-            st.error("API Key de Google Maps no configurada. La búsqueda está desactivada.")
-
-        # --- BARRA DE BÚSQUEDA CON BOTÓN ---
-        address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
-        
-        if st.button("Buscar Dirección"):
-            if address and gmaps:
-                with st.spinner("Buscando dirección..."):
-                    geocode_result = gmaps.geocode(address, region='CO') # region='CO' da prioridad a Colombia
-                    if geocode_result:
-                        location = geocode_result[0]['geometry']['location']
-                        coords = [location['lat'], location['lng']]
-                        # Actualizamos el estado del mapa
-                        st.session_state.map_state["marker"] = coords
-                        st.session_state.map_state["center"] = coords
-                        st.session_state.map_state["zoom"] = 16
-                        st.rerun()
-                    else:
-                        st.error("Dirección no encontrada.")
-            elif not address:
-                st.warning("Por favor, ingresa una dirección para buscar.")
-
-        # --- LÓGICA DEL MAPA INTERACTIVO (se mantiene igual) ---
+        # --- LÓGICA DE MAPA CORREGIDA ---
         if "map_state" not in st.session_state:
             st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
 
@@ -519,28 +492,30 @@ def main():
             st.session_state.map_state["marker"] = [map_data["last_clicked"]["lat"], map_data["last_clicked"]["lng"]]
             st.rerun()
 
-        # --- Lógica para obtener HSP (sin cambios) ---
+        # --- LÓGICA DE HSP CORREGIDA ---
         hsp_mensual_calculado = None
+        latitud, longitud = None, None # Se inicializan aquí para que siempre existan
+
         if st.session_state.map_state["marker"]:
-            lat, lon = st.session_state.map_state["marker"]
-            st.write(f"**Coordenadas Seleccionadas:** Lat: `{lat:.6f}` | Long: `{lon:.6f}`")
-            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (lat, lon):
+            latitud, longitud = st.session_state.map_state["marker"] # Se asignan si hay marcador
+            st.write(f"**Coordenadas Seleccionadas:** Lat: `{latitud:.6f}` | Long: `{longitud:.6f}`")
+            if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
                 with st.spinner("Consultando base de datos satelital (PVGIS)..."):
-                    st.session_state.pvgis_data = get_pvgis_hsp(lat, lon)
-                    st.session_state.last_coords = (lat, lon)
+                    st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
+                    st.session_state.last_coords = (latitud, longitud)
             hsp_mensual_calculado = st.session_state.pvgis_data
             if hsp_mensual_calculado:
                 st.success("✅ Datos de HSP obtenidos de PVGIS.")
                 promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
                 st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
         else:
-            st.info("👈 Escribe una dirección y haz clic en 'Buscar' o haz clic directamente en el mapa.")
+            st.info("👈 Haz clic en el mapa para una cotización precisa.")
 
-        ciudad_input = st.selectbox("Ciudad (usada si no se selecciona punto en el mapa)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
+        ciudad_input = st.selectbox("Ciudad (usada como respaldo)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
         if hsp_mensual_calculado:
             hsp_a_usar = hsp_mensual_calculado
-            ciudad_para_calculo = f"Coord. ({latitud:.2f}, {longitud:.2f})"
+            ciudad_para_calculo = f"Coord. ({latitud:.2f}, {longitud:.2f})" # Ahora 'latitud' siempre existe
         else:
             hsp_a_usar = HSP_MENSUAL_POR_CIUDAD[ciudad_input]
             ciudad_para_calculo = ciudad_input
@@ -755,6 +730,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
