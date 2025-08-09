@@ -457,7 +457,6 @@ def get_coords_from_address(address):
 def main():
     st.set_page_config(page_title="Calculadora Solar", layout="wide", initial_sidebar_state="expanded")
 
-    # --- Bloque para anchar la barra lateral ---
     st.markdown(
         """
         <style>
@@ -471,13 +470,11 @@ def main():
 
     st.title("☀️ Calculadora y Cotizador Solar Profesional")
 
-    # --- INICIALIZACIÓN DE CREDENCIALES Y CONSECUTIVO DE PROYECTO ---
-   
+    # --- INICIALIZACIÓN DE SERVICIOS Y DATOS ---
     drive_service = None
     numero_proyecto_del_año = 1
-    parent_folder_id = None 
+    parent_folder_id = None
     try:
-        # Estas líneas DEBEN estar indentadas
         creds = Credentials(
             None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
             token_uri='https://oauth2.googleapis.com/token',
@@ -487,14 +484,12 @@ def main():
         )
         drive_service = build('drive', 'v3', credentials=creds)
         parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
-        
         if parent_folder_id:
             numero_proyecto_del_año = obtener_siguiente_consecutivo(drive_service, parent_folder_id)
         else:
-             st.warning("ID de la carpeta padre no encontrado en las variables de entorno.")
-
+            st.warning("ID de la carpeta padre no encontrado. El consecutivo iniciará en 1.")
     except Exception as e:
-        st.warning(f"Secretos de Google Drive no configurados o inválidos. La creación de carpetas está desactivada. Error: {e}")
+        st.warning(f"Secretos de Google Drive no configurados o inválidos. La creación de carpetas está desactivada.")
 
     # ==============================================================================
     # INTERFAZ EN LA BARRA LATERAL (SIDEBAR)
@@ -502,9 +497,15 @@ def main():
     with st.sidebar:
         st.header("Parámetros de Entrada")
         
-        st.subheader("Información del Proyecto")
+       st.subheader("Datos del Cliente y Propuesta")
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
-        ubicacion = st.text_input("Ubicación (Opcional)", "Villa Roca 1")
+        documento_cliente = st.text_input("Documento del Cliente (CC o NIT)", "123.456.789-0")
+        direccion_proyecto = st.text_input("Dirección del Proyecto", "Villa Roca 1 Int. 9B, Copacabana")
+        # Aseguramos que se use st.date_input para la fecha
+        fecha_propuesta = st.date_input("Fecha de la Propuesta", datetime.date.today()) 
+        
+        st.subheader("Información del Proyecto (Interna)")
+        ubicacion = st.text_input("Ubicación (Etiqueta para carpeta)", "Villa Roca 1")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
         st.subheader("Ubicación Geográfica")
@@ -758,7 +759,13 @@ def main():
                 datos_para_pdf["Cuota Mensual del Credito (COP)"] = f"{cuota_mensual_credito:,.2f}"
                 datos_para_pdf["Desembolso Inicial (COP)"] = f"{desembolso_inicial_cliente:,.2f}"
             
-            pdf = PropuestaPDF(client_name=nombre_cliente, project_name=nombre_proyecto)
+            pdf = PropuestaPDF(
+                client_name=nombre_cliente, 
+                project_name=nombre_proyecto,
+                documento=documento_cliente,
+                direccion=direccion_proyecto,
+                fecha=fecha_propuesta  # <-- Aquí se pasa el objeto de fecha
+            )
             pdf_bytes = pdf.generar(datos_para_pdf)
             nombre_pdf_final = f"{nombre_proyecto}.pdf"
 
@@ -778,6 +785,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
