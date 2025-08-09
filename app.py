@@ -497,7 +497,7 @@ def main():
     with st.sidebar:
         st.header("Parámetros de Entrada")
         
-       st.subheader("Datos del Cliente y Propuesta")
+        st.subheader("Datos del Cliente y Propuesta")
         nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
         documento_cliente = st.text_input("Documento del Cliente (CC o NIT)", "123.456.789-0")
         direccion_proyecto = st.text_input("Dirección del Proyecto", "Villa Roca 1 Int. 9B, Copacabana")
@@ -785,6 +785,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
