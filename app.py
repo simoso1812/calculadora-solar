@@ -481,11 +481,63 @@ class PropuestaPDF(FPDF):
         self.add_page()
         self.image('assets/13.jpg', x=0, y=0, w=210)
         
+
+        
     def crear_pagina_contacto(self):
         self.add_page()
         self.image('assets/14.jpg', x=0, y=0, w=210)
 
-    def generar(self, datos_calculadora, lat=None, lon=None):
+
+    def crear_pagina_financiacion(self, datos):
+        self.add_page()
+        self.image('assets/fin.jpg', x=0, y=0, w=210)
+        
+        self.set_text_color(0, 0, 0) # Texto negro
+        
+        # --- Posicionamos los datos de financiación (Coordenadas estimadas) ---
+        
+        # Anticipo (Desembolso Inicial) - formato simplificado
+        self.set_font('Roboto', 'B', 35)
+        self.set_xy(42, 56)
+        desembolso_str = datos.get("Desembolso Inicial (COP)", "0")
+        desembolso_valor = float(desembolso_str.replace("$", "").replace(",", "")) if desembolso_str != "0" else 0
+        desembolso_millones = desembolso_valor / 1000000
+        self.cell(w=50, txt=f"{desembolso_millones:.1f}", align='C')
+
+        # Cuota Mensual - formato simplificado
+        self.set_font('Roboto', 'B', 35)
+        self.set_xy(42, 94)
+        cuota_str = datos.get("Cuota Mensual del Credito (COP)", "0")
+        cuota_valor = float(cuota_str.replace("$", "").replace(",", "")) if cuota_str != "0" else 0
+        cuota_millones = cuota_valor / 1000000
+        self.cell(w=50, txt=f"{cuota_millones:.1f}", align='C')
+
+        # Ahorro Mensual - calcular como promedio de generación año 1 × precio del kWh
+        self.set_font('Roboto', 'B', 35)
+        self.set_xy(42, 132)
+        ahorro_anual_str = datos.get("Ahorro Estimado Primer Ano (COP)", "0")
+        ahorro_anual_valor = float(ahorro_anual_str.replace("$", "").replace(",", "")) if ahorro_anual_str != "0" else 0
+        ahorro_mensual_calculado = ahorro_anual_valor / 12
+        ahorro_millones = ahorro_mensual_calculado / 1000000
+        self.cell(w=50, txt=f"{ahorro_millones:.1f}", align='C')
+        
+        # --- Variables adicionales ---
+        # Obtener plazo del crédito real (en meses)
+        plazo_credito = datos.get("Plazo del Crédito", "0")
+        # Vida útil = plazo del crédito en años (convertir meses a años)
+        vida_util = str(int(plazo_credito) // 12) if plazo_credito != "0" else "0"
+        
+        # Plazo del crédito
+        self.set_font('Roboto', 'B', 15)
+        self.set_xy(104,191)
+        self.cell(w=50, txt=str(plazo_credito), align='C')
+        
+        # Vida útil del proyecto (igual al plazo del crédito)
+        self.set_font('Roboto', 'B', 15)
+        self.set_xy(19,214)
+        self.cell(w=50, txt=str(vida_util), align='C')
+
+    def generar(self, datos_calculadora, usa_financiamiento, lat=None, lon=None):
         """
         Llama a todos los métodos en orden para construir el documento.
         """
@@ -499,6 +551,11 @@ class PropuestaPDF(FPDF):
         self.crear_pagina_tecnica(datos_calculadora)
         self.crear_pagina_alcance()
         self.crear_pagina_terminos(datos_calculadora)
+        
+        # Página de financiación solo si se requiere
+        if usa_financiamiento:
+            self.crear_pagina_financiacion(datos_calculadora)
+        
         self.crear_pagina_aspectos_1()
         self.crear_pagina_aspectos_2()
         self.crear_pagina_aspectos_3()
@@ -587,14 +644,14 @@ def gestionar_creacion_drive(service, parent_folder_id, nombre_proyecto, pdf_byt
                 else:
                     st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
             with st.spinner("Buscando carpeta de destino para el contrato..."):
-                query_contrato = f"'{id_carpeta_principal_nueva}' in parents and name='04_Permisos_y_Legal'"
-                results_contrato = service.files().list(q=query_contrato, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-                items_contrato = results_contrato.get('files', [])
-                if items_contrato:
-                    id_carpeta_contrato = items_contrato[0].get('id')
-                    subir_docx_a_drive(service, id_carpeta_contrato, nombre_contrato, contrato_bytes)
-                else:
-                    st.warning("No se encontró la subcarpeta '04_Permisos_y_Legal'.")
+             query_contrato = f"'{id_carpeta_principal_nueva}' in parents and name='04_Permisos_y_Legal'"
+             results_contrato = service.files().list(q=query_contrato, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+             items_contrato = results_contrato.get('files', [])
+             if items_contrato:
+                id_carpeta_contrato = items_contrato[0].get('id')
+                subir_docx_a_drive(service, id_carpeta_contrato, nombre_contrato, contrato_bytes)
+             else:
+                st.warning("No se encontró la subcarpeta '04_Permisos_y_Legal'.")
         return folder.get('webViewLink')
     except Exception as e:
         st.error(f"Error en el proceso de Google Drive: {e}")
@@ -836,7 +893,7 @@ def get_static_map_image(lat, lon, api_key):
 
         # Crear directorio si no existe
         os.makedirs(os.path.dirname(image_path), exist_ok=True)
-        
+
         with open(image_path, "wb") as f:
             f.write(response.content)
 
@@ -1128,8 +1185,8 @@ def render_mobile_interface():
 def render_tab_cliente_mobile():
     """Tab de cliente para interfaz móvil"""
     st.header("👤 Datos del Cliente")
-    
-    # Datos del cliente
+        
+        # Datos del cliente
     nombre_cliente = st.text_input("Nombre del Cliente", key="nombre_mobile")
     documento_cliente = st.text_input("Documento del Cliente (CC o NIT)", key="doc_mobile")
     direccion_proyecto = st.text_input("Dirección del Proyecto", key="dir_mobile")
@@ -1402,10 +1459,16 @@ def render_tab_archivos_mobile():
                 "Tipo de Cubierta": cubierta,
                 "Potencia de Paneles": f"{int(pot_panel)}",
                 "Potencia AC Inversor": f"{pot_ac}",
+                "Desembolso Inicial (COP)": f"${desembolso_ini:,.0f}",
+                "Cuota Mensual del Credito (COP)": f"${cuota_mensual:,.0f}",
+                "Plazo del Crédito": str(plazo * 12) if usa_fin else "0",
             }
             
+            # Determinar si hay financiamiento
+            usa_financiamiento = fin.get('usa_financiamiento', False)
+            
             pdf = PropuestaPDF(client_name=cliente.get('nombre','Cliente'), project_name=datos_pdf["Nombre del Proyecto"], documento=cliente.get('documento',''), direccion=cliente.get('direccion',''), fecha=cliente.get('fecha', datetime.date.today()))
-            pdf_bytes = pdf.generar(datos_pdf, lat, lon)
+            pdf_bytes = pdf.generar(datos_pdf, usa_financiamiento, lat, lon)
             nombre_proyecto = datos_pdf["Nombre del Proyecto"]
             nombre_pdf_final = f"{nombre_proyecto}.pdf"
             datos_contrato = datos_pdf.copy(); datos_contrato['Fecha de la Propuesta'] = cliente.get('fecha', datetime.date.today())
@@ -1451,7 +1514,7 @@ def render_desktop_interface():
         st.markdown("🖥️")
     
     st.success("✅ Interfaz desktop cargada correctamente")
-    
+
     # --- INICIALIZACIÓN DE SERVICIOS Y DATOS ---
     drive_service = None
     numero_proyecto_del_año = 1
@@ -1560,8 +1623,8 @@ def render_desktop_interface():
                 # Mostrar calidad de los datos
                 if any(hsp < 1.0 or hsp > 8.0 for hsp in hsp_mensual_calculado):
                     st.warning("⚠️ Algunos valores HSP están fuera del rango típico. Se han ajustado automáticamente.")
-            else:
-                st.info("👈 Escribe una dirección, busca, o haz clic directamente en el mapa.")
+        else:
+            st.info("👈 Escribe una dirección, busca, o haz clic directamente en el mapa.")
 
         ciudad_input = st.selectbox("Ciudad (usada como respaldo)", list(HSP_MENSUAL_POR_CIUDAD.keys()))
         
@@ -1793,6 +1856,7 @@ def render_desktop_interface():
                 datos_para_pdf["Monto a Financiar (COP)"] = f"{monto_a_financiar_redondeado:,.0f}"
                 datos_para_pdf["Cuota Mensual del Credito (COP)"] = f"{cuota_mensual_credito:,.0f}"
                 datos_para_pdf["Desembolso Inicial (COP)"] = f"{desembolso_inicial_redondeado:,.0f}"
+                datos_para_pdf["Plazo del Crédito"] = str(plazo_credito_años * 12)
             
             datos_para_contrato = datos_para_pdf.copy() # Copiamos los datos
             datos_para_contrato['Fecha de la Propuesta'] = fecha_propuesta
@@ -1805,7 +1869,7 @@ def render_desktop_interface():
                 fecha=fecha_propuesta 
             )
 
-            pdf_bytes = pdf.generar(datos_para_pdf, lat, lon)
+            pdf_bytes = pdf.generar(datos_para_pdf, usa_financiamiento, lat, lon)
             nombre_pdf_final = f"{nombre_proyecto}.pdf"
             
             nombre_contrato_final = f"Contrato - {nombre_proyecto}.docx"
