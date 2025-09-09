@@ -1294,6 +1294,15 @@ def render_tab_finanzas_mobile():
     """Tab de finanzas para interfaz móvil"""
     st.header("💰 Parámetros Financieros")
     
+    # Opción de precio manual para emergencias y descuentos
+    precio_manual = st.toggle("💰 Precio Manual (Emergencias/Descuentos)", help="Activa esta opción para ingresar un precio personalizado del proyecto", key="precio_manual_mobile")
+    
+    if precio_manual:
+        precio_manual_valor = st.number_input("Precio Manual del Proyecto (COP)", min_value=1000000, value=50000000, step=100000, help="Ingresa el precio total del proyecto en COP", key="precio_manual_valor_mobile")
+        st.warning("⚠️ **Modo Precio Manual Activado** - Se usará este valor en lugar del cálculo automático")
+    else:
+        precio_manual_valor = None
+    
     # Parámetros financieros
     costo_kwh = st.number_input("Costo del kWh (COP)", min_value=100, max_value=2000, value=850, step=50, key="costo_mobile")
     indexacion = st.slider("Inflación anual (%)", 0.0, 20.0, 5.0, 0.5, key="index_mobile")
@@ -1326,6 +1335,8 @@ def render_tab_finanzas_mobile():
             'costo_kwh': costo_kwh,
             'indexacion': indexacion,
             'tasa_descuento': tasa_descuento,
+            'precio_manual': precio_manual,
+            'precio_manual_valor': precio_manual_valor,
             'usa_financiamiento': usa_financiamiento,
             'porcentaje': porcentaje,
             'tasa_interes': tasa_interes,
@@ -1397,6 +1408,27 @@ def render_tab_archivos_mobile():
                     tasa_degradacion=0.001, precio_excedentes=300.0,
                     incluir_baterias=incluir_bat, costo_kwh_bateria=costo_kwh_bat,
                     profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=dias_auto)
+            
+            # Aplicar precio manual si está activado
+            precio_manual = fin.get('precio_manual', False)
+            precio_manual_valor = fin.get('precio_manual_valor', None)
+            
+            if precio_manual and precio_manual_valor:
+                val_total = precio_manual_valor
+                # Recalcular financiamiento con el precio manual
+                monto_fin = val_total * (perc_fin / 100)
+                monto_fin = math.ceil(monto_fin)
+                
+                cuota_mensual = 0
+                if monto_fin > 0 and plazo > 0 and tasa_int > 0:
+                    tasa_mensual_credito = tasa_int / 12
+                    num_pagos_credito = plazo * 12
+                    cuota_mensual = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_fin))
+                    cuota_mensual = math.ceil(cuota_mensual)
+                
+                desembolso_ini = val_total - monto_fin
+                
+                st.success(f"✅ **Precio Manual Aplicado**: ${val_total:,.0f} COP")
             
             # Mapa estático si hay coords
             lat = lon = None
@@ -1657,6 +1689,16 @@ def render_desktop_interface():
         clima = st.selectbox("Clima predominante", ["SOL", "NUBE"])
 
         st.subheader("Parámetros Financieros")
+        
+        # Opción de precio manual para emergencias y descuentos
+        precio_manual = st.toggle("💰 Precio Manual (Emergencias/Descuentos)", help="Activa esta opción para ingresar un precio personalizado del proyecto")
+        
+        if precio_manual:
+            precio_manual_valor = st.number_input("Precio Manual del Proyecto (COP)", min_value=1000000, value=50000000, step=100000, help="Ingresa el precio total del proyecto en COP")
+            st.warning("⚠️ **Modo Precio Manual Activado** - Se usará este valor en lugar del cálculo automático")
+        else:
+            precio_manual_valor = None
+        
         costkWh = st.number_input("Costo por kWh (COP)", min_value=200, value=850, step=10)
         index_input = st.slider("Indexación de energía (%)", 0.0, 20.0, 5.0, 0.5)
         dRate_input = st.slider("Tasa de descuento (%)", 0.0, 25.0, 10.0, 0.5)
@@ -1708,6 +1750,24 @@ def render_desktop_interface():
                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                            profundidad_descarga=profundidad_descarga / 100,
                            eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia)
+            
+            # Aplicar precio manual si está activado
+            if precio_manual and precio_manual_valor:
+                valor_proyecto_total = precio_manual_valor
+                # Recalcular financiamiento con el precio manual
+                monto_a_financiar = valor_proyecto_total * (perc_financiamiento / 100)
+                monto_a_financiar = math.ceil(monto_a_financiar)
+                
+                cuota_mensual_credito = 0
+                if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
+                    tasa_mensual_credito = (tasa_interes_input / 100) / 12
+                    num_pagos_credito = plazo_credito_años * 12
+                    cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
+                    cuota_mensual_credito = math.ceil(cuota_mensual_credito)
+                
+                desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
+                
+                st.success(f"✅ **Precio Manual Aplicado**: ${valor_proyecto_total:,.0f} COP")
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
