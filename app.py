@@ -133,6 +133,11 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
     
     for escenario in escenarios:
         try:
+            # Usar los mismos parámetros de financiamiento del sidebar, pero cambiar el plazo
+            perc_fin_escenario = perc_financiamiento if escenario["financiamiento"] else 0
+            tasa_interes_escenario = tasa_interes_credito if escenario["financiamiento"] else 0
+            plazo_escenario = plazo_credito_años if escenario["financiamiento"] else 0
+            
             # Calcular cotización para este escenario
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
@@ -140,9 +145,9 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
             potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria = \
                 cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, 
                           ciudad=ciudad, hsp_lista=hsp_lista,
-                          perc_financiamiento=perc_financiamiento if escenario["financiamiento"] else 0, 
-                          tasa_interes_credito=tasa_interes_credito if escenario["financiamiento"] else 0, 
-                          plazo_credito_años=plazo_credito_años if escenario["financiamiento"] else 0,
+                          perc_financiamiento=perc_fin_escenario, 
+                          tasa_interes_credito=tasa_interes_escenario, 
+                          plazo_credito_años=plazo_escenario,
                           tasa_degradacion=0.001, precio_excedentes=300.0,
                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                           profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria, 
@@ -371,7 +376,7 @@ class PropuestaPDF(FPDF):
         valor_ahorro_millones = float(valor_ahorro_str) / 1000000
         self.set_font('DMSans', 'B', 40)
         self.set_xy(32, 106)
-        self.cell(w=30, txt=f"{valor_ahorro_millones:.1f}", align='L')
+        self.cell(w=30, txt=f"{valor_ahorro_millones:.0f}", align='L')
 
         # --- 3. Bloque de Tiempo de Retorno ---
         valor_retorno = datos.get('Periodo de Retorno (anos)', '0')
@@ -424,7 +429,7 @@ class PropuestaPDF(FPDF):
         
         # --- 2. Escribir solo el número de la generación promedio ---
         # Coordenadas estimadas para el número. ¡Este es el otro valor a ajustar!
-        self.set_xy(87, 98)
+        self.set_xy(86, 97)
         self.set_text_color(0, 0, 0) # Texto negro
         self.set_font('Roboto', 'B', 15) # Negrita
         
