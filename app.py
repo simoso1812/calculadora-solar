@@ -114,6 +114,67 @@ def formatear_moneda(valor):
 # FUNCIONES DE CÁLCULO
 # ==============================================================================
 
+def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, 
+                                  ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0, 
+                                  profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+                                  perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0):
+    """
+    Calcula análisis de sensibilidad con TIR a 10 y 20 años con y sin financiación
+    """
+    resultados = {}
+    
+    # Escenarios a analizar
+    escenarios = [
+        {"nombre": "10 años sin financiación", "horizonte": 10, "financiamiento": False},
+        {"nombre": "10 años con financiación", "horizonte": 10, "financiamiento": True},
+        {"nombre": "20 años sin financiación", "horizonte": 20, "financiamiento": False},
+        {"nombre": "20 años con financiación", "horizonte": 20, "financiamiento": True}
+    ]
+    
+    for escenario in escenarios:
+        try:
+            # Calcular cotización para este escenario
+            valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
+            desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
+            tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
+            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria = \
+                cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, 
+                          ciudad=ciudad, hsp_lista=hsp_lista,
+                          perc_financiamiento=perc_financiamiento if escenario["financiamiento"] else 0, 
+                          tasa_interes_credito=tasa_interes_credito if escenario["financiamiento"] else 0, 
+                          plazo_credito_años=plazo_credito_años if escenario["financiamiento"] else 0,
+                          tasa_degradacion=0.001, precio_excedentes=300.0,
+                          incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
+                          profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria, 
+                          dias_autonomia=dias_autonomia, horizonte_tiempo=escenario["horizonte"])
+            
+            # Calcular payback
+            payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
+            payback_exacto = None
+            if payback_simple is not None:
+                if payback_simple > 0 and (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1]) != 0:
+                    payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
+                else:
+                    payback_exacto = float(payback_simple)
+            
+            resultados[escenario["nombre"]] = {
+                "tir": tasa_interna,
+                "vpn": valor_presente,
+                "payback": payback_exacto,
+                "valor_proyecto": valor_proyecto_total,
+                "desembolso_inicial": desembolso_inicial_cliente,
+                "cuota_mensual": cuota_mensual_credito if escenario["financiamiento"] else 0
+            }
+            
+        except Exception as e:
+            st.warning(f"Error calculando {escenario['nombre']}: {e}")
+            resultados[escenario["nombre"]] = {
+                "tir": 0, "vpn": 0, "payback": None, "valor_proyecto": 0, 
+                "desembolso_inicial": 0, "cuota_mensual": 0
+            }
+    
+    return resultados
+
 def recomendar_inversor(size_kwp):
     # (El código de esta función no cambia)
     inverters_disponibles = [3, 5, 6, 8, 10]
@@ -1314,6 +1375,16 @@ def render_tab_finanzas_mobile():
         key="horizonte_mobile"
     )
     
+    # Análisis de sensibilidad
+    incluir_analisis_sensibilidad = st.toggle(
+        "🔍 Análisis de Sensibilidad", 
+        help="Genera un análisis comparativo de TIR a 10 y 20 años con y sin financiación",
+        key="sensibilidad_mobile"
+    )
+    
+    if incluir_analisis_sensibilidad:
+        st.info("📈 **Análisis de Sensibilidad**: Se calculará TIR a 10 y 20 años con y sin financiación")
+    
     # Parámetros financieros
     costo_kwh = st.number_input("Costo del kWh (COP)", min_value=100, max_value=2000, value=850, step=50, key="costo_mobile")
     indexacion = st.slider("Inflación anual (%)", 0.0, 20.0, 5.0, 0.5, key="index_mobile")
@@ -1349,6 +1420,7 @@ def render_tab_finanzas_mobile():
             'precio_manual': precio_manual,
             'precio_manual_valor': precio_manual_valor,
             'horizonte_tiempo': horizonte_tiempo,
+            'incluir_analisis_sensibilidad': incluir_analisis_sensibilidad,
             'usa_financiamiento': usa_financiamiento,
             'porcentaje': porcentaje,
             'tasa_interes': tasa_interes,
@@ -1574,6 +1646,67 @@ def render_tab_archivos_mobile():
             except Exception:
                 st.info("Google Drive no configurado, se omite subida.")
             
+            # Análisis de Sensibilidad en móvil
+            incluir_analisis_sensibilidad = fin.get('incluir_analisis_sensibilidad', False)
+            if incluir_analisis_sensibilidad:
+                st.header("📊 Análisis de Sensibilidad")
+                st.info("🔍 **Análisis comparativo** de TIR a 10 y 20 años con y sin financiación")
+                
+                with st.spinner("Calculando análisis de sensibilidad..."):
+                    # Calcular análisis de sensibilidad
+                    analisis_sensibilidad = calcular_analisis_sensibilidad(
+                        consumo, size, cantidad, cubierta, clima, index_input, dRate_input, 
+                        costkWh, int(pot_panel), ciudad=ciudad_calc, hsp_lista=hsp_data,
+                        incluir_baterias=incluir_bat, costo_kwh_bateria=costo_kwh_bat,
+                        profundidad_descarga=0.9, eficiencia_bateria=0.95, 
+                        dias_autonomia=dias_auto, perc_financiamiento=perc_fin, 
+                        tasa_interes_credito=tasa_int, plazo_credito_años=plazo
+                    )
+                
+                # Crear tabla comparativa
+                st.subheader("📈 Comparativa de Escenarios")
+                
+                # Preparar datos para la tabla
+                datos_tabla = []
+                for escenario, datos in analisis_sensibilidad.items():
+                    datos_tabla.append({
+                        "Escenario": escenario,
+                        "TIR": f"{datos['tir']:.2%}" if datos['tir'] is not None else "N/A",
+                        "VPN (COP)": f"${datos['vpn']:,.0f}" if datos['vpn'] is not None else "N/A",
+                        "Payback (años)": f"{datos['payback']:.2f}" if datos['payback'] is not None else "N/A",
+                        "Desembolso Inicial": f"${datos['desembolso_inicial']:,.0f}",
+                        "Cuota Mensual": f"${datos['cuota_mensual']:,.0f}" if datos['cuota_mensual'] > 0 else "N/A"
+                    })
+                
+                # Mostrar tabla
+                df_sensibilidad = pd.DataFrame(datos_tabla)
+                st.dataframe(df_sensibilidad, use_container_width=True)
+                
+                # Análisis de conclusiones
+                st.subheader("💡 Conclusiones del Análisis")
+                
+                # Encontrar mejores escenarios
+                mejor_tir_10 = max([(k, v['tir']) for k, v in analisis_sensibilidad.items() if '10 años' in k and v['tir'] is not None], key=lambda x: x[1], default=(None, 0))
+                mejor_tir_20 = max([(k, v['tir']) for k, v in analisis_sensibilidad.items() if '20 años' in k and v['tir'] is not None], key=lambda x: x[1], default=(None, 0))
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.2%}" if mejor_tir_10[0] else "N/A", 
+                             help=f"Escenario: {mejor_tir_10[0]}" if mejor_tir_10[0] else "")
+                
+                with col2:
+                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.2%}" if mejor_tir_20[0] else "N/A",
+                             help=f"Escenario: {mejor_tir_20[0]}" if mejor_tir_20[0] else "")
+                
+                # Recomendaciones
+                st.info("""
+                **📋 Recomendaciones:**
+                - **TIR más alta**: Indica mayor rentabilidad del proyecto
+                - **Payback más bajo**: Indica recuperación más rápida de la inversión
+                - **Con financiación**: Reduce desembolso inicial pero puede afectar TIR
+                - **Sin financiación**: Mayor desembolso inicial pero potencialmente mejor TIR
+                """)
+
             st.download_button("📥 Descargar Propuesta PDF", data=pdf_bytes, file_name=nombre_pdf_final, mime="application/pdf", use_container_width=True)
             if contrato_bytes:
                 st.download_button("📝 Descargar Contrato Word", data=contrato_bytes, file_name=f"Contrato - {nombre_proyecto}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
@@ -1764,6 +1897,16 @@ def render_desktop_interface():
             help="Selecciona el período de análisis para calcular TIR, VPN y Payback"
         )
         
+        # Análisis de sensibilidad
+        st.subheader("📊 Análisis de Sensibilidad")
+        incluir_analisis_sensibilidad = st.toggle(
+            "🔍 Incluir Análisis de Sensibilidad", 
+            help="Genera un análisis comparativo de TIR a 10 y 20 años con y sin financiación"
+        )
+        
+        if incluir_analisis_sensibilidad:
+            st.info("📈 **Análisis de Sensibilidad**: Se calculará TIR a 10 y 20 años con y sin financiación para mostrar la robustez del proyecto")
+        
         costkWh = st.number_input("Costo por kWh (COP)", min_value=200, value=850, step=10)
         index_input = st.slider("Indexación de energía (%)", 0.0, 20.0, 5.0, 0.5)
         dRate_input = st.slider("Tasa de descuento (%)", 0.0, 25.0, 10.0, 0.5)
@@ -1898,6 +2041,66 @@ def render_desktop_interface():
                 col4.metric("Batería Recomendada", f"{capacidad_nominal_bateria:.1f} kWh")
             else:
                 col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
+
+            # Análisis de Sensibilidad
+            if incluir_analisis_sensibilidad:
+                st.header("📊 Análisis de Sensibilidad")
+                st.info("🔍 **Análisis comparativo** de TIR a 10 y 20 años con y sin financiación para evaluar la robustez del proyecto")
+                
+                with st.spinner("Calculando análisis de sensibilidad..."):
+                    # Calcular análisis de sensibilidad
+                    analisis_sensibilidad = calcular_analisis_sensibilidad(
+                        Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, 
+                        costkWh, module, ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                        incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
+                        profundidad_descarga=profundidad_descarga / 100, eficiencia_bateria=eficiencia_bateria / 100, 
+                        dias_autonomia=dias_autonomia, perc_financiamiento=perc_financiamiento, 
+                        tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años
+                    )
+                
+                # Crear tabla comparativa
+                st.subheader("📈 Comparativa de Escenarios")
+                
+                # Preparar datos para la tabla
+                datos_tabla = []
+                for escenario, datos in analisis_sensibilidad.items():
+                    datos_tabla.append({
+                        "Escenario": escenario,
+                        "TIR": f"{datos['tir']:.2%}" if datos['tir'] is not None else "N/A",
+                        "VPN (COP)": f"${datos['vpn']:,.0f}" if datos['vpn'] is not None else "N/A",
+                        "Payback (años)": f"{datos['payback']:.2f}" if datos['payback'] is not None else "N/A",
+                        "Desembolso Inicial": f"${datos['desembolso_inicial']:,.0f}",
+                        "Cuota Mensual": f"${datos['cuota_mensual']:,.0f}" if datos['cuota_mensual'] > 0 else "N/A"
+                    })
+                
+                # Mostrar tabla
+                df_sensibilidad = pd.DataFrame(datos_tabla)
+                st.dataframe(df_sensibilidad, use_container_width=True)
+                
+                # Análisis de conclusiones
+                st.subheader("💡 Conclusiones del Análisis")
+                
+                # Encontrar mejores escenarios
+                mejor_tir_10 = max([(k, v['tir']) for k, v in analisis_sensibilidad.items() if '10 años' in k and v['tir'] is not None], key=lambda x: x[1], default=(None, 0))
+                mejor_tir_20 = max([(k, v['tir']) for k, v in analisis_sensibilidad.items() if '20 años' in k and v['tir'] is not None], key=lambda x: x[1], default=(None, 0))
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.2%}" if mejor_tir_10[0] else "N/A", 
+                             help=f"Escenario: {mejor_tir_10[0]}" if mejor_tir_10[0] else "")
+                
+                with col2:
+                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.2%}" if mejor_tir_20[0] else "N/A",
+                             help=f"Escenario: {mejor_tir_20[0]}" if mejor_tir_20[0] else "")
+                
+                # Recomendaciones
+                st.info("""
+                **📋 Recomendaciones:**
+                - **TIR más alta**: Indica mayor rentabilidad del proyecto
+                - **Payback más bajo**: Indica recuperación más rápida de la inversión
+                - **Con financiación**: Reduce desembolso inicial pero puede afectar TIR
+                - **Sin financiación**: Mayor desembolso inicial pero potencialmente mejor TIR
+                """)
 
             with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
                 st.subheader("Desglose Basado en Promedios Históricos")
