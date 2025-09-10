@@ -165,39 +165,45 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                 else:
                     cuota_mensual_credito = 0
             
-            # Recalcular flujo de caja usando la misma lógica que la función principal
-            fcl = []
-            for i in range(escenario["horizonte"]):
-                # Calcular ahorro anual para cada año (misma lógica que la función principal)
-                ahorro_anual_total = 0
-                if incluir_baterias:
-                    ahorro_anual_total = (Load * 12) * costkWh
-                else:  # Lógica On-Grid
-                    for gen_mes in monthly_generation:
-                        consumo_mes = Load
-                        if gen_mes >= consumo_mes:
-                            ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
-                        else:
-                            ahorro_mes = gen_mes * costkWh
-                        ahorro_anual_total += ahorro_mes
+            # Para escenarios sin financiación, usar el mismo flujo de caja base
+            if not escenario["financiamiento"]:
+                # Usar el flujo de caja original pero truncado al horizonte del escenario
+                fcl_original = fcl.copy()
+                fcl = fcl_original[:escenario["horizonte"] + 1]  # +1 para incluir el desembolso inicial
+            else:
+                # Para escenarios con financiación, recalcular el flujo de caja
+                fcl = []
+                for i in range(escenario["horizonte"]):
+                    # Calcular ahorro anual para cada año (misma lógica que la función principal)
+                    ahorro_anual_total = 0
+                    if incluir_baterias:
+                        ahorro_anual_total = (Load * 12) * costkWh
+                    else:  # Lógica On-Grid
+                        for gen_mes in monthly_generation:
+                            consumo_mes = Load
+                            if gen_mes >= consumo_mes:
+                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                            else:
+                                ahorro_mes = gen_mes * costkWh
+                            ahorro_anual_total += ahorro_mes
+                    
+                    # Aplicar indexación anual
+                    ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
+                    
+                    # Mantenimiento anual
+                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
+                    
+                    # Cuotas anuales del crédito
+                    cuotas_anuales_credito = 0
+                    if i < plazo_escenario: 
+                        cuotas_anuales_credito = cuota_mensual_credito * 12
+                    
+                    # Flujo anual
+                    flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+                    fcl.append(flujo_anual)
                 
-                # Aplicar indexación anual
-                ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-                
-                # Mantenimiento anual
-                mantenimiento_anual = 0.05 * ahorro_anual_indexado
-                
-                # Cuotas anuales del crédito
-                cuotas_anuales_credito = 0
-                if i < plazo_escenario: 
-                    cuotas_anuales_credito = cuota_mensual_credito * 12
-                
-                # Flujo anual
-                flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
-                fcl.append(flujo_anual)
-            
-            # Insertar desembolso inicial al inicio
-            fcl.insert(0, -desembolso_inicial_cliente)
+                # Insertar desembolso inicial al inicio
+                fcl.insert(0, -desembolso_inicial_cliente)
             
             # Recalcular métricas financieras
             valor_presente = npf.npv(dRate, fcl)
@@ -211,6 +217,7 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                     payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
                 else:
                     payback_exacto = float(payback_simple)
+            
             
             resultados[escenario["nombre"]] = {
                 "tir": tasa_interna,
