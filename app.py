@@ -153,13 +153,14 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                tasa_degradacion=0, precio_excedentes=0,
                incluir_baterias=False, costo_kwh_bateria=0, 
-               profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2):
+               profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+               horizonte_tiempo=25):
     
     # Se asegura de tener la lista de HSP mensuales para el cálculo
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
     
     n = 0.8
-    life = 25
+    life = horizonte_tiempo
     if clima.strip().upper() == "NUBE": n -= 0.05
     
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
@@ -1294,6 +1295,7 @@ def render_tab_finanzas_mobile():
     """Tab de finanzas para interfaz móvil"""
     st.header("💰 Parámetros Financieros")
     
+    
     # Opción de precio manual para emergencias y descuentos
     precio_manual = st.toggle("💰 Precio Manual (Emergencias/Descuentos)", help="Activa esta opción para ingresar un precio personalizado del proyecto", key="precio_manual_mobile")
     
@@ -1302,6 +1304,15 @@ def render_tab_finanzas_mobile():
         st.warning("⚠️ **Modo Precio Manual Activado** - Se usará este valor en lugar del cálculo automático")
     else:
         precio_manual_valor = None
+    
+    # Horizonte de tiempo para análisis financiero
+    horizonte_tiempo = st.selectbox(
+        "📅 Horizonte de Análisis (años)", 
+        [15, 20, 25, 30, 35, 40], 
+        index=2,  # 25 años por defecto
+        help="Selecciona el período de análisis para calcular TIR, VPN y Payback",
+        key="horizonte_mobile"
+    )
     
     # Parámetros financieros
     costo_kwh = st.number_input("Costo del kWh (COP)", min_value=100, max_value=2000, value=850, step=50, key="costo_mobile")
@@ -1337,6 +1348,7 @@ def render_tab_finanzas_mobile():
             'tasa_descuento': tasa_descuento,
             'precio_manual': precio_manual,
             'precio_manual_valor': precio_manual_valor,
+            'horizonte_tiempo': horizonte_tiempo,
             'usa_financiamiento': usa_financiamiento,
             'porcentaje': porcentaje,
             'tasa_interes': tasa_interes,
@@ -1401,13 +1413,17 @@ def render_tab_archivos_mobile():
                 if st.session_state.get('map_state',{}).get('marker') else ciudad_input
             )
             
+            # Obtener horizonte de tiempo de los datos financieros
+            horizonte_tiempo = fin.get('horizonte_tiempo', 25)
+            
             val_total, size_calc, monto_fin, cuota_mensual, desembolso_ini, fcl, trees, monthly_gen, vpn, tir, cant_calc, life, rec_inv, lcoe, n_final, hsp_final, pot_ac, ahorro_a1, area_req, cap_bat = \
                 cotizacion(consumo, size, cantidad, cubierta, clima, index_input, dRate_input, costkWh, int(pot_panel),
                     ciudad=ciudad_calc, hsp_lista=hsp_data,
                     perc_financiamiento=perc_fin, tasa_interes_credito=tasa_int, plazo_credito_años=plazo,
                     tasa_degradacion=0.001, precio_excedentes=300.0,
                     incluir_baterias=incluir_bat, costo_kwh_bateria=costo_kwh_bat,
-                    profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=dias_auto)
+                    profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=dias_auto,
+                    horizonte_tiempo=horizonte_tiempo)
             
             # Aplicar precio manual si está activado
             precio_manual = fin.get('precio_manual', False)
@@ -1740,6 +1756,14 @@ def render_desktop_interface():
         else:
             precio_manual_valor = None
         
+        # Horizonte de tiempo para análisis financiero
+        horizonte_tiempo = st.selectbox(
+            "📅 Horizonte de Análisis (años)", 
+            [15, 20, 25, 30, 35, 40], 
+            index=2,  # 25 años por defecto
+            help="Selecciona el período de análisis para calcular TIR, VPN y Payback"
+        )
+        
         costkWh = st.number_input("Costo por kWh (COP)", min_value=200, value=850, step=10)
         index_input = st.slider("Indexación de energía (%)", 0.0, 20.0, 5.0, 0.5)
         dRate_input = st.slider("Tasa de descuento (%)", 0.0, 25.0, 10.0, 0.5)
@@ -1790,7 +1814,8 @@ def render_desktop_interface():
                            plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                            profundidad_descarga=profundidad_descarga / 100,
-                           eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia)
+                           eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
+                           horizonte_tiempo=horizonte_tiempo)
             
             # Aplicar precio manual si está activado
             if precio_manual and precio_manual_valor:
@@ -1861,6 +1886,10 @@ def render_desktop_interface():
                     payback_exacto = float(payback_simple)
 
             st.header("Resultados de la Propuesta")
+            
+            # Indicador del horizonte de tiempo
+            st.info(f"📅 **Análisis financiero a {horizonte_tiempo} años** - TIR, VPN y Payback calculados para este período")
+            
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Valor del Proyecto", f"${valor_proyecto_total:,.0f}")
             col2.metric("TIR", f"{tasa_interna:.2%}")
