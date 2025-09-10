@@ -1904,6 +1904,9 @@ def render_desktop_interface():
             help="Genera un análisis comparativo de TIR a 10 y 20 años con y sin financiación"
         )
         
+        # Debug: Mostrar el valor del toggle
+        st.write(f"🔧 Debug - Toggle activado: {incluir_analisis_sensibilidad}")
+        
         if incluir_analisis_sensibilidad:
             st.info("📈 **Análisis de Sensibilidad**: Se calculará TIR a 10 y 20 años con y sin financiación para mostrar la robustez del proyecto")
         
@@ -2043,6 +2046,7 @@ def render_desktop_interface():
                 col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
 
             # Análisis de Sensibilidad
+            st.write(f"🔧 Debug - Verificando toggle: {incluir_analisis_sensibilidad}")
             if incluir_analisis_sensibilidad:
                 st.header("📊 Análisis de Sensibilidad")
                 st.info("🔍 **Análisis comparativo** de TIR a 10 y 20 años con y sin financiación para evaluar la robustez del proyecto")
