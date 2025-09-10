@@ -117,7 +117,8 @@ def formatear_moneda(valor):
 def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, 
                                   ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0, 
                                   profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
-                                  perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0):
+                                  perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
+                                  precio_manual=None):
     """
     Calcula análisis de sensibilidad con TIR a 10 y 20 años con y sin financiación
     """
@@ -152,6 +153,42 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                           profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria, 
                           dias_autonomia=dias_autonomia, horizonte_tiempo=escenario["horizonte"])
+            
+            # Si hay precio manual, recalcular con ese precio
+            if precio_manual is not None:
+                valor_proyecto_total = precio_manual
+                monto_a_financiar = valor_proyecto_total * perc_fin_escenario
+                desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
+                
+                if perc_fin_escenario > 0:
+                    cuota_mensual_credito = npf.pmt(tasa_interes_escenario / 12, plazo_escenario * 12, -monto_a_financiar)
+                else:
+                    cuota_mensual_credito = 0
+                
+                # Recalcular flujo de caja con el precio manual
+                fcl = []
+                for i in range(escenario["horizonte"]):
+                    # Ahorro anual indexado
+                    ahorro_anual_indexado = ahorro_año1 * ((1 + index) ** i)
+                    
+                    # Mantenimiento anual
+                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
+                    
+                    # Cuotas anuales del crédito
+                    cuotas_anuales_credito = 0
+                    if i < plazo_escenario: 
+                        cuotas_anuales_credito = cuota_mensual_credito * 12
+                    
+                    # Flujo anual
+                    flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+                    fcl.append(flujo_anual)
+                
+                # Insertar desembolso inicial al inicio
+                fcl.insert(0, -desembolso_inicial_cliente)
+                
+                # Recalcular métricas financieras
+                valor_presente = npf.npv(dRate, fcl)
+                tasa_interna = npf.irr(fcl)
             
             # Calcular payback
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
@@ -2064,7 +2101,8 @@ def render_desktop_interface():
                         incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                         profundidad_descarga=profundidad_descarga / 100, eficiencia_bateria=eficiencia_bateria / 100, 
                         dias_autonomia=dias_autonomia, perc_financiamiento=perc_financiamiento, 
-                        tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años
+                        tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años,
+                        precio_manual=precio_manual_valor
                     )
                 
                 # Crear tabla comparativa
