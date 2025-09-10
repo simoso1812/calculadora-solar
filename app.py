@@ -363,7 +363,7 @@ class PropuestaPDF(FPDF):
         # --- 1. Bloque de TIR ---
         valor_tir = datos.get('TIR (Tasa Interna de Retorno)', '0%').replace('%', '')
         self.set_font('DMSans', 'B', 40)
-        self.set_xy(77, 69)
+        self.set_xy(76, 69)
         self.cell(w=30, txt=valor_tir, align='L')
 
         # --- 2. Bloque de Ahorro Anual ---
@@ -398,7 +398,7 @@ class PropuestaPDF(FPDF):
         cantidad_paneles = str(datos.get('Cantidad de Paneles', 'XX').split(' ')[0])
 
         # --- 1. Número grande al lado de la 'x' ---
-        self.set_xy(44, 76) 
+        self.set_xy(43, 76) 
         self.set_font('DMSans', 'B', 45)
         # CORRECCIÓN: Color de texto a negro
         self.set_text_color(0, 0, 0) 
@@ -424,7 +424,7 @@ class PropuestaPDF(FPDF):
         
         # --- 2. Escribir solo el número de la generación promedio ---
         # Coordenadas estimadas para el número. ¡Este es el otro valor a ajustar!
-        self.set_xy(89, 97)
+        self.set_xy(87, 98)
         self.set_text_color(0, 0, 0) # Texto negro
         self.set_font('Roboto', 'B', 15) # Negrita
         
@@ -1614,7 +1614,7 @@ def render_tab_archivos_mobile():
                 "Inversor Recomendado": f"{rec_inv}",
                 "Generacion Promedio Mensual (kWh)": f"{prom_gen:,.1f}",
                 "Ahorro Estimado Primer Ano (COP)": f"{ahorro_a1:,.2f}",
-                "TIR (Tasa Interna de Retorno)": f"{tir:.2%}",
+                "TIR (Tasa Interna de Retorno)": f"{tir:.1%}",
                 "VPN (Valor Presente Neto) (COP)": f"{vpn:,.2f}",
                 "Periodo de Retorno (anos)": "N/A",
                 "Tipo de Cubierta": cubierta,
@@ -1671,7 +1671,7 @@ def render_tab_archivos_mobile():
                 for escenario, datos in analisis_sensibilidad.items():
                     datos_tabla.append({
                         "Escenario": escenario,
-                        "TIR": f"{datos['tir']:.2%}" if datos['tir'] is not None else "N/A",
+                        "TIR": f"{datos['tir']:.1%}" if datos['tir'] is not None else "N/A",
                         "VPN (COP)": f"${datos['vpn']:,.0f}" if datos['vpn'] is not None else "N/A",
                         "Payback (años)": f"{datos['payback']:.2f}" if datos['payback'] is not None else "N/A",
                         "Desembolso Inicial": f"${datos['desembolso_inicial']:,.0f}",
@@ -1691,11 +1691,11 @@ def render_tab_archivos_mobile():
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.2%}" if mejor_tir_10[0] else "N/A", 
+                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.1%}" if mejor_tir_10[0] else "N/A", 
                              help=f"Escenario: {mejor_tir_10[0]}" if mejor_tir_10[0] else "")
                 
                 with col2:
-                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.2%}" if mejor_tir_20[0] else "N/A",
+                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.1%}" if mejor_tir_20[0] else "N/A",
                              help=f"Escenario: {mejor_tir_20[0]}" if mejor_tir_20[0] else "")
                 
                 # Recomendaciones
@@ -2038,7 +2038,7 @@ def render_desktop_interface():
             
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Valor del Proyecto", f"${valor_proyecto_total:,.0f}")
-            col2.metric("TIR", f"{tasa_interna:.2%}")
+            col2.metric("TIR", f"{tasa_interna:.1%}")
             col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
             if incluir_baterias:
                 col4.metric("Batería Recomendada", f"{capacidad_nominal_bateria:.1f} kWh")
@@ -2070,7 +2070,7 @@ def render_desktop_interface():
                 for escenario, datos in analisis_sensibilidad.items():
                     datos_tabla.append({
                         "Escenario": escenario,
-                        "TIR": f"{datos['tir']:.2%}" if datos['tir'] is not None else "N/A",
+                        "TIR": f"{datos['tir']:.1%}" if datos['tir'] is not None else "N/A",
                         "VPN (COP)": f"${datos['vpn']:,.0f}" if datos['vpn'] is not None else "N/A",
                         "Payback (años)": f"{datos['payback']:.2f}" if datos['payback'] is not None else "N/A",
                         "Desembolso Inicial": f"${datos['desembolso_inicial']:,.0f}",
@@ -2090,11 +2090,11 @@ def render_desktop_interface():
                 
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.2%}" if mejor_tir_10[0] else "N/A", 
+                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.1%}" if mejor_tir_10[0] else "N/A", 
                              help=f"Escenario: {mejor_tir_10[0]}" if mejor_tir_10[0] else "")
                 
                 with col2:
-                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.2%}" if mejor_tir_20[0] else "N/A",
+                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.1%}" if mejor_tir_20[0] else "N/A",
                              help=f"Escenario: {mejor_tir_20[0]}" if mejor_tir_20[0] else "")
                 
                 # Recomendaciones
@@ -2219,7 +2219,7 @@ def render_desktop_interface():
                 "Inversor Recomendado": f"{recomendacion_inversor}",
                 "Generacion Promedio Mensual (kWh)": f"{generacion_promedio_mensual:,.1f}",
                 "Ahorro Estimado Primer Ano (COP)": f"{ahorro_año1:,.2f}",
-                "TIR (Tasa Interna de Retorno)": f"{tasa_interna:.2%}",
+                "TIR (Tasa Interna de Retorno)": f"{tasa_interna:.1%}",
                 "VPN (Valor Presente Neto) (COP)": f"{valor_presente:,.2f}",
                 "Periodo de Retorno (anos)": f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A",
                 "Tipo de Cubierta": cubierta,
