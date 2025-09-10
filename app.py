@@ -165,11 +165,24 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                 else:
                     cuota_mensual_credito = 0
                 
-                # Recalcular flujo de caja con el precio manual
+                # Recalcular flujo de caja con el precio manual usando la misma lógica que la función principal
                 fcl = []
                 for i in range(escenario["horizonte"]):
-                    # Ahorro anual indexado
-                    ahorro_anual_indexado = ahorro_año1 * ((1 + index) ** i)
+                    # Calcular ahorro anual para cada año (misma lógica que la función principal)
+                    ahorro_anual_total = 0
+                    if incluir_baterias:
+                        ahorro_anual_total = (Load * 12) * costkWh
+                    else:  # Lógica On-Grid
+                        for gen_mes in monthly_generation:
+                            consumo_mes = Load
+                            if gen_mes >= consumo_mes:
+                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                            else:
+                                ahorro_mes = gen_mes * costkWh
+                            ahorro_anual_total += ahorro_mes
+                    
+                    # Aplicar indexación anual
+                    ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
                     
                     # Mantenimiento anual
                     mantenimiento_anual = 0.05 * ahorro_anual_indexado
