@@ -118,7 +118,7 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                                   ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0, 
                                   profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
                                   perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
-                                  precio_manual=None):
+                                  precio_manual=None, horizonte_base=25):
     """
     Calcula análisis de sensibilidad con TIR a 10 y 20 años con y sin financiación
     """
@@ -152,12 +152,13 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                           tasa_degradacion=0.001, precio_excedentes=300.0,
                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                           profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria, 
-                          dias_autonomia=dias_autonomia, horizonte_tiempo=escenario["horizonte"])
+                          dias_autonomia=dias_autonomia, horizonte_tiempo=horizonte_base)
             
             # SIEMPRE recalcular el flujo de caja para asegurar consistencia
             if precio_manual is not None:
                 valor_proyecto_total = precio_manual
-                monto_a_financiar = valor_proyecto_total * perc_fin_escenario
+                # perc_fin_escenario proviene del sidebar (0..100). Convertir a decimal.
+                monto_a_financiar = valor_proyecto_total * (perc_fin_escenario / 100)
                 desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
                 
                 if perc_fin_escenario > 0:
@@ -245,6 +246,16 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                     payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
                 else:
                     payback_exacto = float(payback_simple)
+            
+            # DEBUG: Mostrar información detallada
+            print(f"\n=== DEBUG ESCENARIO: {escenario['nombre']} ===")
+            print(f"Financiamiento: {escenario['financiamiento']}")
+            print(f"Horizonte: {escenario['horizonte']}")
+            print(f"Desembolso inicial: {desembolso_inicial_cliente:,.0f}")
+            print(f"Primeros 10 flujos: {[f'{x:,.0f}' for x in fcl[:10]]}")
+            print(f"Payback calculado: {payback_exacto}")
+            print(f"Suma acumulada primeros 6 años: {[f'{x:,.0f}' for x in np.cumsum(fcl)[:6]]}")
+            print("=" * 50)
             
             
             resultados[escenario["nombre"]] = {
@@ -2120,6 +2131,15 @@ def render_desktop_interface():
                     payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
                 else:
                     payback_exacto = float(payback_simple)
+            
+            # DEBUG: Mostrar información del cálculo principal
+            print(f"\n=== DEBUG CÁLCULO PRINCIPAL ===")
+            print(f"Horizonte: {horizonte_tiempo}")
+            print(f"Desembolso inicial: {desembolso_inicial_cliente:,.0f}")
+            print(f"Primeros 10 flujos: {[f'{x:,.0f}' for x in fcl[:10]]}")
+            print(f"Payback calculado: {payback_exacto}")
+            print(f"Suma acumulada primeros 6 años: {[f'{x:,.0f}' for x in np.cumsum(fcl)[:6]]}")
+            print("=" * 50)
 
             st.header("Resultados de la Propuesta")
             
@@ -2150,7 +2170,7 @@ def render_desktop_interface():
                         profundidad_descarga=profundidad_descarga / 100, eficiencia_bateria=eficiencia_bateria / 100, 
                         dias_autonomia=dias_autonomia, perc_financiamiento=perc_financiamiento, 
                         tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años,
-                        precio_manual=precio_manual_valor
+                        precio_manual=precio_manual_valor, horizonte_base=horizonte_tiempo
                     )
                 
                 # Crear tabla comparativa
