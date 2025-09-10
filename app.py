@@ -1428,7 +1428,48 @@ def render_tab_archivos_mobile():
                 
                 desembolso_ini = val_total - monto_fin
                 
+                # RECALCULAR FLUJO DE CAJA COMPLETO con el precio manual
+                fcl = []  # Reiniciar flujo de caja
+                for i in range(life):
+                    # Calcular ahorro anual para cada año
+                    ahorro_anual_total = 0
+                    if incluir_bat:
+                        ahorro_anual_total = (consumo * 12) * costkWh
+                    else:  # Lógica On-Grid
+                        for gen_mes in monthly_gen:
+                            consumo_mes = consumo
+                            if gen_mes >= consumo_mes:
+                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                            else:
+                                ahorro_mes = gen_mes * costkWh
+                            ahorro_anual_total += ahorro_mes
+                    
+                    # Aplicar indexación
+                    ahorro_anual_indexado = ahorro_anual_total * ((1 + index_input) ** i)
+                    if i == 0: 
+                        ahorro_a1 = ahorro_anual_total
+                    
+                    # Mantenimiento anual
+                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
+                    
+                    # Cuotas anuales del crédito
+                    cuotas_anuales_credito = 0
+                    if i < plazo: 
+                        cuotas_anuales_credito = cuota_mensual * 12
+                    
+                    # Flujo anual
+                    flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+                    fcl.append(flujo_anual)
+                
+                # Insertar desembolso inicial al inicio
+                fcl.insert(0, -desembolso_ini)
+                
+                # Recalcular métricas financieras
+                vpn = npf.npv(dRate_input, fcl)
+                tir = npf.irr(fcl)
+                
                 st.success(f"✅ **Precio Manual Aplicado**: ${val_total:,.0f} COP")
+                st.info("🔄 **Flujo de caja recalculado** con el precio manual para métricas correctas")
             
             # Mapa estático si hay coords
             lat = lon = None
@@ -1767,7 +1808,48 @@ def render_desktop_interface():
                 
                 desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
                 
+                # RECALCULAR FLUJO DE CAJA COMPLETO con el precio manual
+                fcl = []  # Reiniciar flujo de caja
+                for i in range(life):
+                    # Calcular ahorro anual para cada año
+                    ahorro_anual_total = 0
+                    if incluir_baterias:
+                        ahorro_anual_total = (Load * 12) * costkWh
+                    else:  # Lógica On-Grid
+                        for gen_mes in monthly_generation:
+                            consumo_mes = Load
+                            if gen_mes >= consumo_mes:
+                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                            else:
+                                ahorro_mes = gen_mes * costkWh
+                            ahorro_anual_total += ahorro_mes
+                    
+                    # Aplicar indexación
+                    ahorro_anual_indexado = ahorro_anual_total * ((1 + index_input / 100) ** i)
+                    if i == 0: 
+                        ahorro_año1 = ahorro_anual_total
+                    
+                    # Mantenimiento anual
+                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
+                    
+                    # Cuotas anuales del crédito
+                    cuotas_anuales_credito = 0
+                    if i < plazo_credito_años: 
+                        cuotas_anuales_credito = cuota_mensual_credito * 12
+                    
+                    # Flujo anual
+                    flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+                    fcl.append(flujo_anual)
+                
+                # Insertar desembolso inicial al inicio
+                fcl.insert(0, -desembolso_inicial_cliente)
+                
+                # Recalcular métricas financieras
+                valor_presente = npf.npv(dRate_input / 100, fcl)
+                tasa_interna = npf.irr(fcl)
+                
                 st.success(f"✅ **Precio Manual Aplicado**: ${valor_proyecto_total:,.0f} COP")
+                st.info("🔄 **Flujo de caja recalculado** con el precio manual para métricas correctas")
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
             payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
