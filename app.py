@@ -21,6 +21,9 @@ from geopy.geocoders import Nominatim
 import time
 from docx import Document
 from num2words import num2words
+from PyPDF2 import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
 
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
@@ -109,6 +112,106 @@ def formatear_moneda(valor):
         return f"${valor:,.0f}"
     except (ValueError, TypeError):
         return "$0"
+
+# ==============================================================================
+# COTIZADOR DE CARGADORES ELÉCTRICOS (SIN FINANCIAMIENTO)
+# ==============================================================================
+
+def cotizacion_cargadores_costos(distancia_metros: float):
+    """Calcula desglose de costos para instalación de un punto de carga.
+    Retorna (IVA, diseño, materiales, costo_total, costo_base).
+    """
+    try:
+        costo_base = (35184 * float(distancia_metros) + 857195) * 1.1
+        iva = 0.19 * costo_base
+        diseno = 0.35 * costo_base
+        materiales = 0.65 * costo_base
+        costo_total = costo_base + iva
+        return iva, diseno, materiales, costo_total, costo_base
+    except Exception:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+
+
+def calcular_materiales_cargador(distancia_metros: float):
+    """Calcula lista de materiales aproximada en función de la distancia."""
+    d = float(distancia_metros)
+    lista = [
+        ("TUBERIA EMT 3/4 Pulg", int(round(d / 3.0, 0) + 1), "UNIDADES"),
+        ("UNION EMT 3/4 Pulg", int(round(d / 3.0, 0) + round(d / 6.0, 0)), "UNIDADES"),
+        ("CURVA EMT 3/4 Pulg", int(round(d / 6.0, 0)), "UNIDADES"),
+        ("ENTRADA CAJA EMT 3/4 Pulg", 2, "UNIDADES"),
+        ("CABLE 8 AWG NEGRO", int(round(d + 3.0, 0) * 2), "METROS"),
+        ("CABLE 8 AWG VERDE", int(round(d + 3.0, 0)), "METROS"),
+        ("CAJA DEXSON 18X14", 1, "UNIDAD"),
+    ]
+    return lista
+
+
+def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float):
+    """Genera el PDF de cotización de cargadores usando la plantilla en assets y retorna (bytes_pdf, desglose_dict)."""
+    from io import BytesIO
+
+    plantilla_path = os.path.join("assets", "Plantilla_MIRAC_CARGADORES.pdf")
+    fecha_actual = datetime.datetime.now().strftime("%d-%m-%Y")
+
+    iva, diseno, materiales, costo_total, costo_base = cotizacion_cargadores_costos(distancia_metros)
+
+    # PDFs temporales en memoria
+    temp1 = BytesIO()
+    temp2 = BytesIO()
+
+    # Página 1 temporal (costo total y fecha y nombre)
+    c1 = canvas.Canvas(temp1, pagesize=letter)
+    c1.setFont("Helvetica-Bold", 26)
+    c1.drawString(100, 82, f"{costo_total:,.0f}")
+    c1.setFont("Helvetica-Bold", 13)
+    c1.drawString(462, 757, fecha_actual)
+    c1.setFont("Helvetica-Bold", 14)
+    c1.drawString(195, 624, nombre_cliente_lugar)
+    c1.save()
+    temp1.seek(0)
+
+    # Página 2 temporal (tabla de costos)
+    c2 = canvas.Canvas(temp2, pagesize=letter)
+    c2.setFont("Helvetica-Bold", 14)
+    offset_y = 56
+    c2.drawString(462, 757, fecha_actual)
+    c2.drawString(465, 576 + offset_y, f"${diseno:,.0f}")
+    c2.drawString(465, 551 + offset_y, f"${materiales:,.0f}")
+    c2.drawString(465, 500 + offset_y, f"${costo_base:,.0f}")
+    c2.drawString(465, 474 + offset_y, f"${iva:,.0f}")
+    c2.drawString(465, 448 + offset_y, f"${costo_total:,.0f}")
+    c2.save()
+    temp2.seek(0)
+
+    # Combinar con plantilla (3 páginas)
+    output_buffer = BytesIO()
+    reader = PdfReader(plantilla_path)
+    writer = PdfWriter()
+
+    if len(reader.pages) < 3:
+        raise ValueError("La plantilla de cargadores debe tener 3 páginas")
+
+    pagina1 = reader.pages[0]
+    pagina1.merge_page(PdfReader(temp1).pages[0])
+    writer.add_page(pagina1)
+
+    pagina2 = reader.pages[1]
+    pagina2.merge_page(PdfReader(temp2).pages[0])
+    writer.add_page(pagina2)
+
+    writer.add_page(reader.pages[2])
+    writer.write(output_buffer)
+    output_buffer.seek(0)
+
+    desglose = {
+        "Costo Base": costo_base,
+        "IVA": iva,
+        "Diseño": diseno,
+        "Materiales": materiales,
+        "Costo Total": costo_total,
+    }
+    return output_buffer.getvalue(), desglose
 
 # ==============================================================================
 # FUNCIONES DE CÁLCULO
@@ -1328,8 +1431,8 @@ def render_mobile_interface():
         """)
     
     # Tabs principales con Ubicación
-    tab1, tabUbic, tab2, tab3, tab4, tab5 = st.tabs([
-        "👤 Cliente", "📍 Ubicación", "⚡ Sistema", "💰 Finanzas", "📊 Resultados", "📁 Archivos"
+    tab1, tabUbic, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "👤 Cliente", "📍 Ubicación", "⚡ Sistema", "💰 Finanzas", "📊 Resultados", "📁 Archivos", "🔌 Cargadores"
     ])
     
     with tab1:
@@ -1344,6 +1447,8 @@ def render_mobile_interface():
         render_tab_resultados_mobile()
     with tab5:
         render_tab_archivos_mobile()
+    with tab6:
+        render_tab_cargadores_mobile()
 
 def render_tab_cliente_mobile():
     """Tab de cliente para interfaz móvil"""
@@ -1817,6 +1922,33 @@ def render_tab_archivos_mobile():
         except Exception as e:
             st.error(f"❌ Error al generar: {e}")
 
+def render_tab_cargadores_mobile():
+    """Pestaña móvil para cotizar cargadores (sin financiamiento)."""
+    st.header("🔌 Cotizador de Cargadores")
+    nombre_cliente_lugar = st.text_input("Nombre del Cliente y Lugar", key="ev_nombre_mobile")
+    distancia_m = st.number_input("Distancia parqueadero a subestación (m)", min_value=1.0, value=10.0, step=1.0, key="ev_dist_mobile")
+    if st.button("🧮 Calcular y generar PDF de cargadores", use_container_width=True, key="ev_gen_mobile"):
+        try:
+            pdf_bytes, desglose = generar_pdf_cargadores(nombre_cliente_lugar or "Cliente", distancia_m)
+            st.success("✅ Cotización generada")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Costo Base", formatear_moneda(desglose.get("Costo Base", 0)))
+            col2.metric("IVA (19%)", formatear_moneda(desglose.get("IVA", 0)))
+            col3.metric("Diseño (35%)", formatear_moneda(desglose.get("Diseño", 0)))
+            col4.metric("Materiales (65%)", formatear_moneda(desglose.get("Materiales", 0)))
+            st.metric("Costo Total", formatear_moneda(desglose.get("Costo Total", 0)))
+
+            st.subheader("📋 Materiales estimados")
+            lista = calcular_materiales_cargador(distancia_m)
+            if lista:
+                df_mat = pd.DataFrame(lista, columns=["Material", "Cantidad", "Unidad"])
+                st.table(df_mat)
+
+            nombre_pdf = f"Propuesta Mirac {nombre_cliente_lugar or 'Cliente'}.pdf"
+            st.download_button("📥 Descargar PDF de Cargadores", data=pdf_bytes, file_name=nombre_pdf, mime="application/pdf", use_container_width=True)
+        except Exception as ex:
+            st.error(f"❌ Error generando la cotización de cargadores: {ex}")
+
 def render_desktop_interface():
     """Interfaz optimizada para desktop (tu interfaz actual)"""
     # Debug visual - confirmar que estamos en modo desktop
@@ -2033,6 +2165,26 @@ def render_desktop_interface():
             eficiencia_bateria = st.slider("Eficiencia Carga/Descarga (%)", 80.0, 100.0, 95.0, 0.5)
         else:
             costo_kwh_bateria, profundidad_descarga, eficiencia_bateria = 0, 0, 0
+
+        st.markdown("---")
+        st.subheader("🔌 Cotizador de Cargadores")
+        ev_nombre = st.text_input("Cliente y Lugar (Cargadores)", "")
+        ev_dist = st.number_input("Distancia parqueadero a subestación (m)", min_value=1.0, value=10.0, step=1.0)
+        if st.button("Generar PDF Cargadores", use_container_width=True, key="ev_gen_desktop"):
+            try:
+                ev_pdf, ev_desglose = generar_pdf_cargadores(ev_nombre or "Cliente", ev_dist)
+                st.success("✅ Cotización de Cargadores generada")
+                col_ev1, col_ev2 = st.columns(2)
+                with col_ev1:
+                    st.metric("Costo Base", formatear_moneda(ev_desglose.get("Costo Base", 0)))
+                    st.metric("IVA (19%)", formatear_moneda(ev_desglose.get("IVA", 0)))
+                with col_ev2:
+                    st.metric("Diseño (35%)", formatear_moneda(ev_desglose.get("Diseño", 0)))
+                    st.metric("Materiales (65%)", formatear_moneda(ev_desglose.get("Materiales", 0)))
+                st.metric("Costo Total", formatear_moneda(ev_desglose.get("Costo Total", 0)))
+                st.download_button("📥 Descargar PDF de Cargadores", data=ev_pdf, file_name=f"Propuesta Mirac {ev_nombre or 'Cliente'}.pdf", mime="application/pdf", use_container_width=True)
+            except Exception as ev_ex:
+                st.error(f"❌ Error generando la cotización de cargadores: {ev_ex}")
 
     # ==============================================================================
     # LÓGICA DE CÁLCULO Y VISUALIZACIÓN (AL PRESIONAR EL BOTÓN)
