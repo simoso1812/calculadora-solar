@@ -1,0 +1,56 @@
+{
+  "colombia_grid": {
+    "national_average": 0.245,
+    "by_region": {
+      "BOGOTA": 0.220,
+      "MEDELLIN": 0.250,
+      "CALI": 0.240,
+      "BARRANQUILLA": 0.260,
+      "CARTAGENA": 0.255,
+      "BUCARAMANGA": 0.235,
+      "PEREIRA": 0.245,
+      "MEDELLÍN": 0.250,
+      "CALÍ": 0.240,
+      "BARRANQUILLA": 0.260,
+      "CARTAGENA": 0.255,
+      "BUCARAMANGA": 0.235,
+      "PEREIRA": 0.245
+    }
+  },
+  "colombia_hydro": 0.012,
+  "colombia_thermal": 0.485,
+  "certification_rates": {
+    "carbon_credit_cop_per_ton": 95000,
+    "usd_per_ton": 25.50
+  },
+  "equivalency_factors": {
+    "tree_co2_absorption_kg_per_year": 22,
+    "car_emissions_kg_per_year": 4200,
+    "home_electricity_kwh_per_year": 3500,
+    "flight_emissions_kg_per_km": 0.25,
+    "plastic_bottle_co2_kg": 0.06,
+    "smartphone_charge_co2_kg": 0.0083
+  },
+  "metadata": {
+    "source": "XM Colombia 2024 Grid Mix Analysis",
+    "last_updated": "2024-09-16",
+    "methodology": "Lifecycle analysis including transmission losses",
+    "uncertainty": "±10% based on grid composition variations",
+    "standards": [
+      "ISO 14064-1",
+      "WRI/WBCSD GHG Protocol",
+      "Colombian Environmental Regulations"
+    ],
+    "data_quality": "High - Based on official grid operator data",
+    "next_update": "2025-03-01"
+  },
+  "regional_notes": {
+    "BOGOTA": "Lower emissions due to higher hydropower share",
+    "MEDELLIN": "Mixed hydro and thermal generation",
+    "CALI": "Balanced mix with some renewable energy",
+    "BARRANQUILLA": "Higher thermal generation share",
+    "CARTAGENA": "Coastal region with thermal plants",
+    "BUCARAMANGA": "Industrial region with varied energy mix",
+    "PEREIRA": "Agricultural region with moderate emissions"
+  }
+}

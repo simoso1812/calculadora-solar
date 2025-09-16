@@ -24,6 +24,18 @@ from num2words import num2words
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
+try:
+    from notion_client import Client as NotionClient
+except Exception:
+    NotionClient = None
+
+# Import carbon calculator module
+try:
+    from carbon_calculator import CarbonEmissionsCalculator, format_carbon_number, format_currency_cop
+    carbon_calculator = CarbonEmissionsCalculator()
+except ImportError:
+    st.warning("⚠️ Módulo de cálculo de carbono no encontrado. Las funcionalidades de sostenibilidad estarán limitadas.")
+    carbon_calculator = None
 
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
@@ -112,6 +124,76 @@ def formatear_moneda(valor):
         return f"${valor:,.0f}"
     except (ValueError, TypeError):
         return "$0"
+
+# ==============================================================================
+# INTEGRACIÓN CON NOTION (CRM)
+# ==============================================================================
+
+def _build_notion_properties(nombre: str, estado: str, documento: str, direccion: str, proyecto: str, fecha):
+    """Crea el diccionario de propiedades para la página de Notion según nombres configurables."""
+    # Nombres de propiedades configurables por env
+    prop_name = os.environ.get("NOTION_PROP_NAME", "Name")
+    prop_status = os.environ.get("NOTION_PROP_STATUS", "Estado")
+    prop_doc = os.environ.get("NOTION_PROP_DOCUMENTO", "Documento")
+    prop_dir = os.environ.get("NOTION_PROP_DIRECCION", "Direccion")
+    prop_project = os.environ.get("NOTION_PROP_PROYECTO", "Proyecto")
+    prop_date = os.environ.get("NOTION_PROP_FECHA", "Fecha")
+
+    # Fecha a ISO
+    fecha_iso = None
+    try:
+        if hasattr(fecha, 'isoformat'):
+            fecha_iso = fecha.isoformat()
+        elif isinstance(fecha, str):
+            fecha_iso = fecha
+    except Exception:
+        fecha_iso = None
+
+    properties = {
+        prop_name: {"title": [{"text": {"content": nombre or ""}}]},
+        prop_doc: {"rich_text": [{"text": {"content": documento or ""}}]},
+        prop_dir: {"rich_text": [{"text": {"content": direccion or ""}}]},
+        prop_project: {"rich_text": [{"text": {"content": proyecto or ""}}]},
+    }
+    if fecha_iso:
+        properties[prop_date] = {"date": {"start": fecha_iso}}
+
+    # Intento 1: status
+    properties_status = properties.copy()
+    properties_status[prop_status] = {"status": {"name": estado}}
+
+    # Intento 2: select
+    properties_select = properties.copy()
+    properties_select[prop_status] = {"select": {"name": estado}}
+
+    return properties_status, properties_select
+
+
+def agregar_cliente_a_notion_crm(nombre: str, documento: str, direccion: str, proyecto: str, fecha, estado: str = "En conversaciones"):
+    """Agrega un registro en la base de datos de Notion CRM si las credenciales están disponibles.
+    Usa el nombre de estado 'En conversaciones' por defecto.
+    """
+    token = os.environ.get("NOTION_API_TOKEN")
+    database_id = os.environ.get("NOTION_CRM_DATABASE_ID")
+    if not token or not database_id or NotionClient is None:
+        # Integración deshabilitada
+        return False, "Integración Notion no configurada"
+
+    try:
+        notion = NotionClient(auth=token)
+        props_status, props_select = _build_notion_properties(nombre, estado, documento, direccion, proyecto, fecha)
+
+        # Intentar crear con "status" primero
+        try:
+            notion.pages.create(parent={"database_id": database_id}, properties=props_status)
+            return True, "Cliente agregado a Notion (status)"
+        except Exception:
+            # Reintentar con select
+            notion.pages.create(parent={"database_id": database_id}, properties=props_select)
+            return True, "Cliente agregado a Notion (select)"
+
+    except Exception as e:
+        return False, f"Error Notion: {e}"
 
 # ==============================================================================
 # COTIZADOR DE CARGADORES ELÉCTRICOS (SIN FINANCIAMIENTO)
@@ -246,16 +328,17 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
-            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria = \
-                cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, 
+            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria, carbon_data = \
+                cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module,
                           ciudad=ciudad, hsp_lista=hsp_lista,
-                          perc_financiamiento=perc_fin_escenario, 
-                          tasa_interes_credito=tasa_interes_escenario, 
+                          perc_financiamiento=perc_fin_escenario,
+                          tasa_interes_credito=tasa_interes_escenario,
                           plazo_credito_años=plazo_escenario,
                           tasa_degradacion=0.001, precio_excedentes=300.0,
                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
-                          profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria, 
-                          dias_autonomia=dias_autonomia, horizonte_tiempo=horizonte_base)
+                          profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria,
+                          dias_autonomia=dias_autonomia, horizonte_tiempo=horizonte_base,
+                          incluir_carbon=False)  # Disable carbon for sensitivity analysis
             
             # SIEMPRE recalcular el flujo de caja para asegurar consistencia
             if precio_manual is not None:
@@ -414,12 +497,12 @@ def recomendar_inversor(size_kwp):
 
 # Reemplaza tu función cotizacion completa con esta versión final
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
-               hsp_lista=None,
-               perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
-               tasa_degradacion=0, precio_excedentes=0,
-               incluir_baterias=False, costo_kwh_bateria=0, 
-               profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
-               horizonte_tiempo=25):
+                hsp_lista=None,
+                perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
+                tasa_degradacion=0, precio_excedentes=0,
+                incluir_baterias=False, costo_kwh_bateria=0,
+                profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+                horizonte_tiempo=25, incluir_carbon=False):
     
     # Se asegura de tener la lista de HSP mensuales para el cálculo
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
@@ -501,11 +584,34 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     lcoe = (desembolso_inicial_cliente + npf.npv(dRate, [0.05 * ahorro_anual_total * ((1 + index) ** i) for i in range(life)])) / total_lifetime_generation if total_lifetime_generation > 0 else 0
     trees = round(Load * 12 * 0.154 * 22 / 1000, 0)
 
+    # Carbon emissions calculation (NEW)
+    carbon_data = {}
+    if incluir_carbon and carbon_calculator:
+        try:
+            # Calculate annual generation for carbon analysis
+            annual_generation = sum(monthly_generation_init) if monthly_generation_init else 0
+
+            # Get city for emission factor (handle variations)
+            ciudad_normalizada = ciudad.upper() if ciudad else "BOGOTA"
+            if ciudad_normalizada == "MEDELLÍN":
+                ciudad_normalizada = "MEDELLIN"
+            elif ciudad_normalizada == "CALÍ":
+                ciudad_normalizada = "CALI"
+
+            carbon_data = carbon_calculator.calculate_emissions_avoided(
+                annual_generation_kwh=annual_generation,
+                region=ciudad_normalizada,
+                system_lifetime_years=life
+            )
+        except Exception as e:
+            print(f"Error calculating carbon emissions: {e}")
+            carbon_data = carbon_calculator._get_empty_carbon_data() if carbon_calculator else {}
+
     # Se devuelve la lista 'hsp_mensual' en lugar de un solo valor 'HSP'
     return valor_proyecto_total, size, monto_a_financiar, cuota_mensual_credito, \
            desembolso_inicial_cliente, cashflow_free, trees, monthly_generation_init, \
            present_value, internal_rate, quantity, life, recomendacion_inversor_str, \
-           lcoe, n, hsp_mensual, potencia_ac_inversor, ahorro_anual_año1, area_requerida, capacidad_nominal_bateria
+           lcoe, n, hsp_mensual, potencia_ac_inversor, ahorro_anual_año1, area_requerida, capacidad_nominal_bateria, carbon_data
 # ==============================================================================
 # CLASE PARA EL REPORTE PDF
 # ==============================================================================
@@ -1618,6 +1724,13 @@ def render_tab_finanzas_mobile():
         dias_autonomia = 2
         costo_bateria = 0
     
+    st.subheader("🌱 Cálculo de Emisiones de Carbono")
+    incluir_carbon = st.toggle(
+        "🌱 Incluir análisis de sostenibilidad",
+        help="Calcula las emisiones de CO2 evitadas y equivalencias ambientales",
+        key="incluir_carbon_mobile"
+    )
+    
     if st.button("💾 Guardar Parámetros Financieros", use_container_width=True):
         st.session_state.finanzas_data = {
             'costo_kwh': costo_kwh,
@@ -1633,24 +1746,60 @@ def render_tab_finanzas_mobile():
             'plazo': plazo,
             'incluir_baterias': incluir_baterias,
             'dias_autonomia': dias_autonomia,
-            'costo_bateria': costo_bateria
+            'costo_bateria': costo_bateria,
+            'incluir_carbon': incluir_carbon
         }
         st.success("✅ Parámetros financieros guardados")
 
 def render_tab_resultados_mobile():
     """Tab de resultados para interfaz móvil"""
     st.header("📊 Resultados del Cálculo")
-    
+
     if not all(k in st.session_state for k in ['cliente_data', 'sistema_data', 'finanzas_data']):
         st.warning("Completa Cliente, Sistema y Finanzas antes de ver resultados.")
         return
-    
+
     # Mostrar resumen de datos ingresados
     with st.expander("📋 Resumen de Datos"):
         st.write("**Cliente:**", st.session_state.cliente_data.get('nombre', 'N/A'))
         st.write("**Sistema:**", f"{st.session_state.sistema_data.get('size', 'N/A')} kWp")
         st.write("**Consumo:**", f"{st.session_state.sistema_data.get('consumo', 'N/A')} kWh/mes")
-    
+
+    # Check if carbon analysis is enabled
+    fin = st.session_state.finanzas_data
+    incluir_carbon = bool(fin.get('incluir_carbon', False))
+
+    if incluir_carbon:
+        st.header("🌱 Impacto Ambiental y Sostenibilidad")
+        st.info("📊 **Análisis de Sostenibilidad Activado**: Se calcularán las emisiones de carbono evitadas, equivalencias ambientales y valor de certificación.")
+
+        # Carbon metrics in columns (mobile optimized)
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.metric(
+                "CO2 Evitado Anual",
+                "Calculado al generar",
+                help="Toneladas de CO2 evitadas por año"
+            )
+            st.metric(
+                "Árboles Salvados",
+                "Calculado al generar",
+                help="Árboles equivalentes salvados por año"
+            )
+        with col_c2:
+            st.metric(
+                "Valor Carbono",
+                "Calculado al generar",
+                help="Valor potencial de certificación de carbono"
+            )
+            st.metric(
+                "Autos Equivalentes",
+                "Calculado al generar",
+                help="Autos que dejarían de circular por año"
+            )
+
+        st.info("Los resultados detallados de sostenibilidad se mostrarán al generar la propuesta en el tab '📁 Archivos'.")
+
     st.info("Los resultados detallados se mostrarán al generar la propuesta en el tab '📁 Archivos'.")
 
 def render_tab_archivos_mobile():
@@ -1693,15 +1842,18 @@ def render_tab_archivos_mobile():
             
             # Obtener horizonte de tiempo de los datos financieros
             horizonte_tiempo = fin.get('horizonte_tiempo', 25)
-            
-            val_total, size_calc, monto_fin, cuota_mensual, desembolso_ini, fcl, trees, monthly_gen, vpn, tir, cant_calc, life, rec_inv, lcoe, n_final, hsp_final, pot_ac, ahorro_a1, area_req, cap_bat = \
+
+            # Sostenibilidad: usar la preferencia de Finanzas (móvil)
+            incluir_carbon = bool(fin.get('incluir_carbon', False))
+
+            val_total, size_calc, monto_fin, cuota_mensual, desembolso_ini, fcl, trees, monthly_gen, vpn, tir, cant_calc, life, rec_inv, lcoe, n_final, hsp_final, pot_ac, ahorro_a1, area_req, cap_bat, carbon_data = \
                 cotizacion(consumo, size, cantidad, cubierta, clima, index_input, dRate_input, costkWh, int(pot_panel),
                     ciudad=ciudad_calc, hsp_lista=hsp_data,
                     perc_financiamiento=perc_fin, tasa_interes_credito=tasa_int, plazo_credito_años=plazo,
                     tasa_degradacion=0.001, precio_excedentes=300.0,
                     incluir_baterias=incluir_bat, costo_kwh_bateria=costo_kwh_bat,
                     profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=dias_auto,
-                    horizonte_tiempo=horizonte_tiempo)
+                    horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon)
             
             # Aplicar precio manual si está activado
             precio_manual = fin.get('precio_manual', False)
@@ -1919,6 +2071,20 @@ def render_tab_archivos_mobile():
             if link_carpeta:
                 st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({link_carpeta})")
             st.success("✅ Propuesta, contrato y gráficos generados")
+
+            # Notion CRM - agregar a "En conversaciones"
+            agregado, msg = agregar_cliente_a_notion_crm(
+                nombre=cliente.get('nombre',''),
+                documento=cliente.get('documento',''),
+                direccion=cliente.get('direccion',''),
+                proyecto=datos_pdf.get('Nombre del Proyecto',''),
+                fecha=cliente.get('fecha', datetime.date.today()),
+                estado="En conversaciones"
+            )
+            if agregado:
+                st.info("🗂️ Cliente agregado a Notion: En conversaciones")
+            else:
+                st.caption(f"Notion: {msg}")
         except Exception as e:
             st.error(f"❌ Error al generar: {e}")
 
@@ -2167,6 +2333,15 @@ def render_desktop_interface():
             costo_kwh_bateria, profundidad_descarga, eficiencia_bateria = 0, 0, 0
 
         st.markdown("---")
+        st.subheader("🌱 Cálculo de Emisiones de Carbono")
+        incluir_carbon = st.toggle(
+            "🌱 Incluir análisis de sostenibilidad",
+            help="Calcula las emisiones de CO2 evitadas y equivalencias ambientales"
+        )
+        if incluir_carbon:
+            st.info("📊 **Análisis de Sostenibilidad Activado**: Se calcularán las emisiones de carbono evitadas, equivalencias ambientales y valor de certificación.")
+
+        st.markdown("---")
         st.subheader("🔌 Cotizador de Cargadores")
         ev_nombre = st.text_input("Cliente y Lugar (Cargadores)", "")
         ev_dist = st.number_input("Distancia parqueadero a subestación (m)", min_value=1.0, value=10.0, step=1.0)
@@ -2206,15 +2381,15 @@ def render_desktop_interface():
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
-            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria = \
-                cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module, 
-                           ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
-                           perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100, 
-                           plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
-                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
-                           profundidad_descarga=profundidad_descarga / 100,
-                           eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
-                           horizonte_tiempo=horizonte_tiempo)
+            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria, carbon_data = \
+                cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
+                            ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                            perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
+                            plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
+                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
+                            profundidad_descarga=profundidad_descarga / 100,
+                            eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
+                            horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon)
             
             # Aplicar precio manual si está activado
             if precio_manual and precio_manual_valor:
@@ -2306,6 +2481,46 @@ def render_desktop_interface():
                 col4.metric("Batería Recomendada", f"{capacidad_nominal_bateria:.1f} kWh")
             else:
                 col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
+
+            # Display carbon metrics if available
+            if incluir_carbon and carbon_data and 'annual_co2_avoided_tons' in carbon_data:
+                st.markdown("---")
+                st.header("🌱 Impacto Ambiental y Sostenibilidad")
+
+                # Carbon metrics in columns
+                col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+                col_c1.metric(
+                    "CO2 Evitado Anual",
+                    f"{carbon_data['annual_co2_avoided_tons']:.1f} ton",
+                    help="Toneladas de CO2 evitadas por año"
+                )
+                col_c2.metric(
+                    "Árboles Salvados",
+                    f"{carbon_data['trees_saved_per_year']:.0f}",
+                    help="Árboles equivalentes salvados por año"
+                )
+                col_c3.metric(
+                    "Valor Carbono",
+                    f"${carbon_data['annual_certification_value_cop']:,.0f}",
+                    help="Valor potencial de certificación de carbono"
+                )
+                col_c4.metric(
+                    "Autos Equivalentes",
+                    f"{carbon_data['cars_off_road_per_year']:.1f}",
+                    help="Autos que dejarían de circular por año"
+                )
+
+                # Additional equivalencies
+                with st.expander("📊 Ver más equivalencias ambientales"):
+                    st.markdown("**Impacto Ambiental Detallado:**")
+                    st.write(f"• **Vuelos evitados**: {carbon_data['flights_avoided_per_year']:.0f} vuelos de ida y vuelta")
+                    st.write(f"• **Botellas de plástico**: {carbon_data['plastic_bottles_avoided_per_year']:,.0f} botellas recicladas")
+                    st.write(f"• **Cargas de celular**: {carbon_data['smartphone_charges_avoided_per_year']:,.0f} cargas de batería")
+
+                    if 'lifetime_co2_avoided_tons' in carbon_data:
+                        st.markdown("**Impacto a Largo Plazo:**")
+                        st.write(f"• **CO2 total evitado**: {carbon_data['lifetime_co2_avoided_tons']:.1f} toneladas en {life} años")
+                        st.write(f"• **Valor total carbono**: ${carbon_data['lifetime_certification_value_cop']:,.0f} COP")
 
             # Análisis de Sensibilidad
             st.write(f"🔧 Debug - Verificando toggle: {incluir_analisis_sensibilidad}")
@@ -2537,6 +2752,20 @@ def render_desktop_interface():
                     use_container_width=True
                 )
             st.success('¡Proceso completado!')
+
+            # Notion CRM - agregar a "En conversaciones" (flujo desktop)
+            agregado, msg = agregar_cliente_a_notion_crm(
+                nombre=nombre_cliente,
+                documento=documento_cliente,
+                direccion=direccion_proyecto,
+                proyecto=nombre_proyecto,
+                fecha=fecha_propuesta,
+                estado="En conversaciones"
+            )
+            if agregado:
+                st.info("🗂️ Cliente agregado a Notion: En conversaciones")
+            else:
+                st.caption(f"Notion: {msg}")
 
 def detect_device_type():
     """Detecta el tipo de dispositivo de forma simple y estable"""
