@@ -1818,7 +1818,7 @@ def render_tab_resultados_mobile():
         # O&M anual (5% del ahorro anual)
         costkWh = float(fin.get('costo_kwh', 850))
         ahorro_anual_aprox = (consumo * 12) * costkWh
-        om_anual = 0.05 * ahorro_anual_aprox
+        om_anual = 0.10 * ahorro_anual_aprox
 
         # Degradación anual
         tasa_degradacion_anual = 0.1  # 0.1% por año
@@ -2458,7 +2458,7 @@ def render_desktop_interface():
 
             # O&M anual (5% del ahorro anual)
             ahorro_anual_aprox = (Load * 12) * costkWh
-            om_anual = 0.05 * ahorro_anual_aprox
+            om_anual = 0.10 * ahorro_anual_aprox
 
             # Degradación anual
             tasa_degradacion_anual = 0.1  # 0.1% por año
