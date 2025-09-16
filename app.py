@@ -2495,7 +2495,7 @@ def render_desktop_interface():
             if st.button("📄 Generar Resumen Financiero (PDF)", key="export_financial_pdf"):
                 try:
                     from fpdf import FPDF
-                    import datetime
+                    import datetime as dt
 
                     class FinancialSummaryPDF(FPDF):
                         def header(self):
@@ -2506,7 +2506,7 @@ def render_desktop_interface():
                         def footer(self):
                             self.set_y(-15)
                             self.set_font('Arial', 'I', 8)
-                            self.cell(0, 10, f'Generado el {datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 0, 'C')
+                            self.cell(0, 10, f'Generado el {dt.datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 0, 'C')
 
                     pdf = FinancialSummaryPDF()
                     pdf.add_page()
@@ -2546,7 +2546,7 @@ def render_desktop_interface():
                     st.download_button(
                         label="📥 Descargar Resumen Financiero (PDF)",
                         data=pdf_bytes,
-                        file_name=f"Resumen_Financiero_{nombre_cliente}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf",
+                        file_name=f"Resumen_Financiero_{nombre_cliente}_{dt.datetime.now().strftime('%Y%m%d')}.pdf",
                         mime="application/pdf",
                         key="download_financial_pdf"
                     )
