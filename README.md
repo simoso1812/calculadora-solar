@@ -19,6 +19,7 @@ Calculadora solar profesional para la empresa Mirac que automatiza el proceso de
 - **Sistemas Off-Grid**: Soporte para baterías y sistemas aislados
 - **Financiamiento**: Cálculo de cuotas y análisis de crédito
 - **Responsive Design**: Interfaz optimizada para móviles y desktop
+- **🌱 Análisis de Sostenibilidad**: Cálculo de emisiones de carbono evitadas y equivalencias ambientales
 
 ## 🛠️ Instalación
 
@@ -26,6 +27,7 @@ Calculadora solar profesional para la empresa Mirac que automatiza el proceso de
 - Python 3.8 o superior
 - Cuenta de Google Cloud Platform con APIs habilitadas
 - API Key de Google Maps
+- Archivo `assets/emission_factors.json` (incluido en el repositorio)
 
 ### Pasos de Instalación
 
@@ -78,6 +80,16 @@ La aplicación crea automáticamente una estructura organizada en Google Drive:
 └── 📁 09_Material_Grafico_y_Marketing
 ```
 
+### Archivos de Configuración
+```
+📁 assets/
+├── 📄 emission_factors.json          # Factores de emisión de carbono
+├── 📄 1.jpg to 14.jpg               # Plantillas PDF
+├── 📄 contrato_plantilla.docx       # Plantilla de contrato
+├── 📄 DMSans-Bold.ttf               # Fuentes
+└── 📄 DMSans-Regular.ttf
+```
+
 ## 📊 Uso de la Aplicación
 
 ### 1. Datos del Cliente
@@ -98,9 +110,11 @@ La aplicación crea automáticamente una estructura organizada en Google Drive:
 - Tasa de descuento
 - Financiamiento opcional
 - Configuración de baterías
+- 🌱 Análisis de sostenibilidad (opcional)
 
 ### 4. Resultados y Reportes
 - Análisis financiero completo
+- 🌱 Impacto ambiental y sostenibilidad
 - Gráficos de generación vs consumo
 - Flujo de caja acumulado
 - Propuesta en PDF
@@ -123,6 +137,12 @@ Generación = Potencia Efectiva × HSP Mensual × Días × Eficiencia
 - **VPN**: Valor Presente Neto
 - **Payback**: Período de retorno de la inversión
 - **LCOE**: Costo Nivelado de Energía
+
+### 🌱 Cálculos de Sostenibilidad
+- **Emisiones de CO2 Evitadas**: Basado en factores de emisión de la red colombiana
+- **Equivalencias Ambientales**: Árboles salvados, autos equivalentes, vuelos evitados
+- **Valor de Certificación**: Potencial valor económico de créditos de carbono
+- **Factores Regionales**: Emisiones específicas por ciudad en Colombia
 
 ## 🔒 Seguridad
 
@@ -148,6 +168,48 @@ Generación = Potencia Efectiva × HSP Mensual × Días × Eficiencia
 - Confirmar que las coordenadas sean válidas
 - Revisar que la ubicación esté en el rango soportado
 
+### Error en Cálculos de Carbono
+- Verificar que `assets/emission_factors.json` exista
+- Confirmar que el módulo `carbon_calculator.py` esté presente
+- Revisar que las dependencias estén instaladas correctamente
+
+## 🌱 Análisis de Sostenibilidad
+
+### Características del Módulo de Carbono
+
+La aplicación incluye un módulo avanzado de cálculo de emisiones de carbono que permite:
+
+#### 📊 Métricas Principales
+- **CO2 Evitado Anual**: Toneladas de CO2 que deja de emitirse por año
+- **Árboles Salvados**: Número de árboles equivalentes en absorción de CO2
+- **Valor de Certificación**: Valor potencial de créditos de carbono en COP
+- **Autos Equivalentes**: Número de vehículos que dejarían de circular
+- **Vuelos Evitados**: Número de vuelos de ida y vuelta equivalentes
+- **Botellas de Plástico**: Cantidad de botellas recicladas equivalentes
+- **Cargas de Celular**: Número de cargas de batería equivalentes
+
+#### 🗺️ Factores de Emisión Regionales
+- **Bogotá**: 0.220 kg CO2/kWh (menor por mayor participación hidroeléctrica)
+- **Medellín**: 0.250 kg CO2/kWh (mezcla hidro y térmica)
+- **Cali**: 0.240 kg CO2/kWh (mezcla balanceada)
+- **Barranquilla**: 0.260 kg CO2/kWh (mayor participación térmica)
+- **Cartagena**: 0.255 kg CO2/kWh (plantas térmicas costeras)
+- **Bucaramanga**: 0.235 kg CO2/kWh (mezcla industrial variada)
+- **Pereira**: 0.245 kg CO2/kWh (región agrícola moderada)
+
+#### 📋 Metodología
+- **Fuente**: XM Colombia - Análisis de mezcla de generación 2024
+- **Estándares**: ISO 14064-1, GHG Protocol, Regulaciones Ambientales Colombianas
+- **Incertidumbre**: ±10% basado en variaciones de composición de la red
+- **Alcance**: Análisis de ciclo de vida incluyendo pérdidas de transmisión
+
+### Configuración del Análisis de Sostenibilidad
+
+1. **Activar en Interfaz Móvil**: En la pestaña "💰 Finanzas" → "🌱 Cálculo de Emisiones de Carbono"
+2. **Activar en Interfaz Desktop**: En el sidebar → "🌱 Cálculo de Emisiones de Carbono"
+3. **Visualizar Resultados**: Métricas aparecen automáticamente en la sección de resultados
+4. **Personalización**: Los factores de emisión se pueden actualizar en `assets/emission_factors.json`
+
 ## 📈 Mejoras Futuras
 
 - [ ] Integración con CRM
@@ -157,6 +219,7 @@ Generación = Potencia Efectiva × HSP Mensual × Días × Eficiencia
 - [ ] Dashboard de métricas
 - [ ] Notificaciones automáticas
 - [ ] Backup automático en la nube
+- [x] **🌱 Análisis de Sostenibilidad (Implementado)**
 
 ## 🤝 Contribución
 
@@ -181,6 +244,7 @@ Para soporte técnico o consultas comerciales:
 
 - **PVGIS**: Datos de radiación solar
 - **Google APIs**: Integración con servicios de Google
+- **XM Colombia**: Datos de emisiones de la red eléctrica
 - **Streamlit**: Framework de la aplicación web
 - **Comunidad Python**: Librerías y herramientas utilizadas
 
