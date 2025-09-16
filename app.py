@@ -1730,7 +1730,14 @@ def render_tab_finanzas_mobile():
         help="Calcula las emisiones de CO2 evitadas y equivalencias ambientales",
         key="incluir_carbon_mobile"
     )
-    
+
+    st.subheader("💼 Resumen Financiero para Financieros")
+    mostrar_resumen_financiero_mobile = st.toggle(
+        "💼 Mostrar resumen financiero",
+        help="Muestra métricas clave para análisis financiero",
+        key="resumen_financiero_mobile"
+    )
+
     if st.button("💾 Guardar Parámetros Financieros", use_container_width=True):
         st.session_state.finanzas_data = {
             'costo_kwh': costo_kwh,
@@ -1747,7 +1754,8 @@ def render_tab_finanzas_mobile():
             'incluir_baterias': incluir_baterias,
             'dias_autonomia': dias_autonomia,
             'costo_bateria': costo_bateria,
-            'incluir_carbon': incluir_carbon
+            'incluir_carbon': incluir_carbon,
+            'mostrar_resumen_financiero_mobile': mostrar_resumen_financiero_mobile
         }
         st.success("✅ Parámetros financieros guardados")
 
@@ -1768,6 +1776,63 @@ def render_tab_resultados_mobile():
     # Check if carbon analysis is enabled
     fin = st.session_state.finanzas_data
     incluir_carbon = bool(fin.get('incluir_carbon', False))
+    mostrar_resumen_financiero = bool(fin.get('mostrar_resumen_financiero_mobile', False))
+
+    if mostrar_resumen_financiero:
+        st.header("💼 Resumen Financiero para Análisis")
+
+        # Calcular métricas financieras clave
+        sistema = st.session_state.sistema_data
+        consumo = float(sistema.get('consumo', 700))
+        pot_panel = float(sistema.get('potencia_panel', 615))
+        cantidad = int(sistema.get('quantity') or max(1, round((consumo * 1.2) / (4.5 * 30 * 0.85) * 1000 // int(pot_panel))))
+        size_calc = float(sistema.get('size') or round(cantidad * pot_panel / 1000, 2))
+        cubierta = sistema.get('cubierta', 'LÁMINA')
+
+        # Calcular costo del proyecto
+        costo_por_kwp = 7587.7 * size_calc**2 - 346085 * size_calc + 7e6
+        valor_proyecto_fv = costo_por_kwp * size_calc
+        if cubierta.strip().upper() == "TEJA":
+            valor_proyecto_fv *= 1.03
+
+        # Costo de baterías si aplica
+        costo_bateria = 0
+        if fin.get('incluir_baterias', False):
+            consumo_diario = consumo / 30
+            dias_auto = int(fin.get('dias_autonomia', 2))
+            capacidad_util_bateria = consumo_diario * dias_auto
+            capacidad_nominal_bateria = capacidad_util_bateria / 0.9  # 90% DoD
+            costo_kwh_bat = int(fin.get('costo_bateria', 0))
+            costo_bateria = capacidad_nominal_bateria * costo_kwh_bat
+
+        valor_proyecto_total = math.ceil(valor_proyecto_fv + costo_bateria)
+
+        # Calcular generación anual aproximada
+        hsp_data = st.session_state.get('pvgis_data') or HSP_MENSUAL_POR_CIUDAD.get(st.session_state.get('ciudad_mobile', 'MEDELLIN'), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
+        hsp_promedio = sum(hsp_data) / len(hsp_data) if hsp_data else 4.5
+
+        # Generación anual inicial
+        potencia_efectiva = min(size_calc, size_calc / 1.2)  # Aproximación
+        generacion_anual_inicial = potencia_efectiva * hsp_promedio * 365 * 0.8  # 80% eficiencia
+
+        # O&M anual (5% del ahorro anual)
+        costkWh = float(fin.get('costo_kwh', 850))
+        ahorro_anual_aprox = (consumo * 12) * costkWh
+        om_anual = 0.05 * ahorro_anual_aprox
+
+        # Degradación anual
+        tasa_degradacion_anual = 0.1  # 0.1% por año
+
+        # Mostrar métricas (mobile optimized)
+        st.metric("💰 Precio del Proyecto", f"${valor_proyecto_total:,.0f} COP")
+        st.metric("🔧 O&M Anual", f"${om_anual:,.0f} COP")
+        st.metric("⚡ Generación Anual Inicial", f"{generacion_anual_inicial:,.0f} kWh")
+        st.metric("📉 Degradación Anual", f"{tasa_degradacion_anual:.1f}%")
+
+        with st.expander("📋 Detalles Técnicos"):
+            st.write(f"**Sistema**: {size_calc:.1f} kWp con {cantidad} paneles")
+            st.write(f"**HSP Promedio**: {hsp_promedio:.2f} kWh/m²/día")
+            st.write(f"**Tipo de Cubierta**: {cubierta}")
 
     if incluir_carbon:
         st.header("🌱 Impacto Ambiental y Sostenibilidad")
@@ -2340,6 +2405,154 @@ def render_desktop_interface():
         )
         if incluir_carbon:
             st.info("📊 **Análisis de Sostenibilidad Activado**: Se calcularán las emisiones de carbono evitadas, equivalencias ambientales y valor de certificación.")
+
+        st.markdown("---")
+        st.subheader("💼 Resumen Financiero para Financieros")
+        mostrar_resumen_financiero = st.toggle(
+            "💼 Mostrar resumen financiero",
+            help="Muestra métricas clave para análisis financiero: precio del proyecto, O&M anual, generación anual y degradación"
+        )
+
+        if mostrar_resumen_financiero:
+            st.markdown("### 📊 Resumen Financiero para Análisis")
+
+            # Calcular métricas financieras clave
+            if opcion == "Por Consumo Mensual (kWh)":
+                # Calcular tamaño del sistema
+                HSP_aprox = 4.5
+                n_aprox = 0.85
+                Ratio = 1.2
+                size_calc = round(Load * Ratio / (HSP_aprox * 30 * n_aprox), 2)
+                quantity_calc = round(size_calc * 1000 / module)
+                size_calc = round(quantity_calc * module / 1000, 2)
+            else:
+                size_calc = size
+                quantity_calc = quantity
+
+            # Calcular costo del proyecto
+            costo_por_kwp = 7587.7 * size_calc**2 - 346085 * size_calc + 7e6
+            valor_proyecto_fv = costo_por_kwp * size_calc
+            if cubierta.strip().upper() == "TEJA":
+                valor_proyecto_fv *= 1.03
+
+            # Costo de baterías si aplica
+            costo_bateria = 0
+            if incluir_baterias:
+                consumo_diario = Load / 30
+                capacidad_util_bateria = consumo_diario * dias_autonomia
+                if profundidad_descarga > 0:
+                    capacidad_nominal_bateria = capacidad_util_bateria / (profundidad_descarga / 100)
+                costo_bateria = capacidad_nominal_bateria * costo_kwh_bateria
+
+            valor_proyecto_total = math.ceil(valor_proyecto_fv + costo_bateria)
+
+            # Calcular generación anual aproximada
+            if hsp_mensual_calculado:
+                hsp_promedio = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
+            else:
+                hsp_promedio = HSP_POR_CIUDAD.get(ciudad_input, 4.5)
+
+            # Generación anual inicial
+            potencia_efectiva = min(size_calc, size_calc / 1.2)  # Aproximación
+            generacion_anual_inicial = potencia_efectiva * hsp_promedio * 365 * n_aprox
+
+            # O&M anual (5% del ahorro anual)
+            ahorro_anual_aprox = (Load * 12) * costkWh
+            om_anual = 0.05 * ahorro_anual_aprox
+
+            # Degradación anual
+            tasa_degradacion_anual = 0.1  # 0.1% por año
+
+            # Mostrar métricas
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("💰 Precio del Proyecto", f"${valor_proyecto_total:,.0f} COP")
+                st.metric("🔧 O&M Anual", f"${om_anual:,.0f} COP", help="5% del ahorro anual estimado")
+                st.metric("⚡ Generación Anual Inicial", f"{generacion_anual_inicial:,.0f} kWh")
+
+            with col2:
+                st.metric("📉 Degradación Anual", f"{tasa_degradacion_anual:.1f}%", help="Pérdida de eficiencia por año")
+                st.metric("🏗️ Tamaño del Sistema", f"{size_calc:.1f} kWp")
+                st.metric("🔌 Potencia del Panel", f"{module} Wp")
+
+            # Información adicional
+            with st.expander("📋 Información Técnica para Financieros"):
+                st.markdown(f"""
+                **📊 Parámetros Técnicos:**
+                - **Sistema**: {size_calc:.1f} kWp con {int(quantity_calc)} paneles
+                - **HSP Promedio**: {hsp_promedio:.2f} kWh/m²/día
+                - **Eficiencia del Sistema**: {n_aprox:.1%}
+                - **Tipo de Cubierta**: {cubierta}
+                - **Ubicación**: {ciudad_input}
+
+                **💡 Notas para Análisis Financiero:**
+                - El O&M incluye mantenimiento preventivo y correctivo
+                - La degradación se aplica anualmente a la generación
+                - Los cálculos son aproximados y pueden variar según condiciones reales
+                """)
+
+            # Opción para exportar como PDF simple
+            if st.button("📄 Generar Resumen Financiero (PDF)", key="export_financial_pdf"):
+                try:
+                    from fpdf import FPDF
+                    import datetime
+
+                    class FinancialSummaryPDF(FPDF):
+                        def header(self):
+                            self.set_font('Arial', 'B', 16)
+                            self.cell(0, 10, 'Resumen Financiero para Análisis', 0, 1, 'C')
+                            self.ln(10)
+
+                        def footer(self):
+                            self.set_y(-15)
+                            self.set_font('Arial', 'I', 8)
+                            self.cell(0, 10, f'Generado el {datetime.datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 0, 'C')
+
+                    pdf = FinancialSummaryPDF()
+                    pdf.add_page()
+                    pdf.set_font('Arial', '', 12)
+
+                    # Contenido del PDF
+                    pdf.cell(0, 10, f'Cliente: {nombre_cliente}', 0, 1)
+                    pdf.cell(0, 10, f'Proyecto: {ubicacion or "Sin especificar"}', 0, 1)
+                    pdf.cell(0, 10, f'Fecha: {fecha_propuesta.strftime("%d/%m/%Y")}', 0, 1)
+                    pdf.ln(10)
+
+                    pdf.set_font('Arial', 'B', 14)
+                    pdf.cell(0, 10, 'Métricas Financieras Clave', 0, 1)
+                    pdf.ln(5)
+
+                    pdf.set_font('Arial', '', 12)
+                    pdf.cell(0, 8, f'Precio del Proyecto: ${valor_proyecto_total:,.0f} COP', 0, 1)
+                    pdf.cell(0, 8, f'O&M Anual: ${om_anual:,.0f} COP', 0, 1)
+                    pdf.cell(0, 8, f'Generación Anual Inicial: {generacion_anual_inicial:,.0f} kWh', 0, 1)
+                    pdf.cell(0, 8, f'Degradación Anual: {tasa_degradacion_anual:.1f}%', 0, 1)
+                    pdf.ln(10)
+
+                    pdf.set_font('Arial', 'B', 14)
+                    pdf.cell(0, 10, 'Parámetros Técnicos', 0, 1)
+                    pdf.ln(5)
+
+                    pdf.set_font('Arial', '', 12)
+                    pdf.cell(0, 8, f'Tamaño del Sistema: {size_calc:.1f} kWp', 0, 1)
+                    pdf.cell(0, 8, f'Cantidad de Paneles: {int(quantity_calc)}', 0, 1)
+                    pdf.cell(0, 8, f'Potencia por Panel: {module} Wp', 0, 1)
+                    pdf.cell(0, 8, f'HSP Promedio: {hsp_promedio:.2f} kWh/m²/día', 0, 1)
+                    pdf.cell(0, 8, f'Tipo de Cubierta: {cubierta}', 0, 1)
+                    pdf.cell(0, 8, f'Ubicación: {ciudad_input}', 0, 1)
+
+                    pdf_bytes = bytes(pdf.output(dest='S'))
+
+                    st.download_button(
+                        label="📥 Descargar Resumen Financiero (PDF)",
+                        data=pdf_bytes,
+                        file_name=f"Resumen_Financiero_{nombre_cliente}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf",
+                        mime="application/pdf",
+                        key="download_financial_pdf"
+                    )
+
+                except Exception as e:
+                    st.error(f"Error generando PDF financiero: {e}")
 
         st.markdown("---")
         st.subheader("🔌 Cotizador de Cargadores")
