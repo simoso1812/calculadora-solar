@@ -2906,11 +2906,17 @@ def render_desktop_interface():
             valor_iva_redondeado = math.ceil(provision_iva_guia / 100) * 100
             valor_sistema_sin_iva_redondeado = valor_total_redondeado - valor_iva_redondeado
 
+            # Usar precio manual si está activado para el PDF principal también
+            valor_pdf = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
+            valor_pdf_redondeado = math.ceil(valor_pdf / 100) * 100
+            valor_iva_pdf = math.ceil((valor_pdf_redondeado * (PROMEDIOS_COSTO['IVA (Impuestos)']/100))/100)*100
+            valor_sistema_sin_iva_pdf = valor_pdf_redondeado - valor_iva_pdf
+
             datos_para_pdf = {
                 "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
-                "Valor Total del Proyecto (COP)": f"${valor_total_redondeado:,.0f}",
-                "Valor Sistema FV (sin IVA)": f"${valor_sistema_sin_iva_redondeado:,.0f}",
-                "Valor IVA": f"${valor_iva_redondeado:,.0f}",
+                "Valor Total del Proyecto (COP)": f"${valor_pdf_redondeado:,.0f}",
+                "Valor Sistema FV (sin IVA)": f"${valor_sistema_sin_iva_pdf:,.0f}",
+                "Valor IVA": f"${valor_iva_pdf:,.0f}",
                 "Tamano del Sistema (kWp)": f"{size}",
                 "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W","Área Requerida Aprox. (m²)": f"{area_requerida}",
                 "Inversor Recomendado": f"{recomendacion_inversor}",
@@ -2924,13 +2930,29 @@ def render_desktop_interface():
                 "Potencia AC Inversor": f"{potencia_ac_inversor}",
             }
             if usa_financiamiento:
-                monto_a_financiar_redondeado = math.ceil(monto_a_financiar / 100) * 100
-                desembolso_inicial_redondeado = valor_total_redondeado - monto_a_financiar_redondeado
-                
+                # Recalcular financiamiento con el precio manual si está activado
+                if precio_manual and precio_manual_valor:
+                    monto_a_financiar_pdf = valor_pdf_redondeado * (perc_financiamiento / 100)
+                    monto_a_financiar_pdf = math.ceil(monto_a_financiar_pdf)
+                    desembolso_inicial_pdf = valor_pdf_redondeado - monto_a_financiar_pdf
+
+                    # Recalcular cuota mensual con precio manual
+                    if monto_a_financiar_pdf > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
+                        tasa_mensual_pdf = (tasa_interes_input / 100) / 12
+                        num_pagos_pdf = plazo_credito_años * 12
+                        cuota_mensual_pdf = abs(npf.pmt(tasa_mensual_pdf, num_pagos_pdf, -monto_a_financiar_pdf))
+                        cuota_mensual_pdf = math.ceil(cuota_mensual_pdf)
+                    else:
+                        cuota_mensual_pdf = 0
+                else:
+                    monto_a_financiar_pdf = monto_a_financiar_redondeado
+                    desembolso_inicial_pdf = desembolso_inicial_redondeado
+                    cuota_mensual_pdf = cuota_mensual_credito
+
                 datos_para_pdf["--- Detalles de Financiamiento ---"] = ""
-                datos_para_pdf["Monto a Financiar (COP)"] = f"{monto_a_financiar_redondeado:,.0f}"
-                datos_para_pdf["Cuota Mensual del Credito (COP)"] = f"{cuota_mensual_credito:,.0f}"
-                datos_para_pdf["Desembolso Inicial (COP)"] = f"{desembolso_inicial_redondeado:,.0f}"
+                datos_para_pdf["Monto a Financiar (COP)"] = f"{monto_a_financiar_pdf:,.0f}"
+                datos_para_pdf["Cuota Mensual del Credito (COP)"] = f"{cuota_mensual_pdf:,.0f}"
+                datos_para_pdf["Desembolso Inicial (COP)"] = f"{desembolso_inicial_pdf:,.0f}"
                 datos_para_pdf["Plazo del Crédito"] = str(plazo_credito_años * 12)
             
             datos_para_contrato = datos_para_pdf.copy() # Copiamos los datos
