@@ -2615,6 +2615,8 @@ def render_desktop_interface():
 
             # Generación anual inicial
             potencia_efectiva = min(size_calc, size_calc / 1.2)  # Aproximación
+            # Use default efficiency if n_aprox is not available
+            n_aprox = 0.85  # Default efficiency value
             generacion_anual_inicial = potencia_efectiva * hsp_promedio * 365 * n_aprox
 
             # O&M anual (5% del ahorro anual)
