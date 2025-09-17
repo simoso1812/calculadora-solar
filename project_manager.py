@@ -43,9 +43,38 @@ class ProjectManager:
             if not self.spreadsheet_id:
                 self._create_projects_spreadsheet()
 
+            # Check parent folder access
+            self._check_parent_folder_access()
+
         except Exception as e:
             print(f"Error initializing Google Sheets: {e}")
             self.service = None
+
+    def _check_parent_folder_access(self):
+        """Check if we can access the parent folder, provide fallback if not"""
+        parent_folder_id = os.environ.get('PARENT_FOLDER_ID')
+
+        if not parent_folder_id:
+            print("No PARENT_FOLDER_ID specified - Google Drive folder operations will be limited")
+            self.parent_folder_accessible = False
+            return
+
+        try:
+            # Try to access the folder
+            folder = self.drive_service.files().get(
+                fileId=parent_folder_id,
+                fields='name, id'
+            ).execute()
+
+            print(f"Parent folder accessible: {folder.get('name')}")
+            self.parent_folder_accessible = True
+
+        except Exception as e:
+            print(f"Cannot access parent folder {parent_folder_id}: {e}")
+            print("This is normal if the folder was created with different OAuth credentials")
+            print("The app will work with limited Google Drive functionality")
+            print("You can still save/load projects and generate financial summaries")
+            self.parent_folder_accessible = False
 
     def _create_projects_spreadsheet(self):
         """Create a new spreadsheet for projects"""
