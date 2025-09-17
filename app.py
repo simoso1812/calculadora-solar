@@ -2523,7 +2523,9 @@ def render_desktop_interface():
                     pdf.ln(5)
 
                     pdf.set_font('Arial', '', 12)
-                    pdf.cell(0, 8, f'Precio del Proyecto: ${valor_proyecto_total:,.0f} COP', 0, 1)
+                    # Usar precio manual si está activado para el PDF también
+                    precio_pdf = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
+                    pdf.cell(0, 8, f'Precio del Proyecto: ${precio_pdf:,.0f} COP', 0, 1)
                     pdf.cell(0, 8, f'O&M Anual: ${om_anual:,.0f} COP', 0, 1)
                     pdf.cell(0, 8, f'Generación Anual Inicial: {generacion_anual_inicial:,.0f} kWh', 0, 1)
                     pdf.cell(0, 8, f'Degradación Anual: {tasa_degradacion_anual:.1f}%', 0, 1)
@@ -2606,20 +2608,20 @@ def render_desktop_interface():
             
             # Aplicar precio manual si está activado
             if precio_manual and precio_manual_valor:
-                valor_proyecto_total = precio_manual_valor
+                val_total = precio_manual_valor
                 # Recalcular financiamiento con el precio manual
-                monto_a_financiar = valor_proyecto_total * (perc_financiamiento / 100)
+                monto_a_financiar = val_total * (perc_financiamiento / 100)
                 monto_a_financiar = math.ceil(monto_a_financiar)
-                
+
                 cuota_mensual_credito = 0
                 if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
                     tasa_mensual_credito = (tasa_interes_input / 100) / 12
                     num_pagos_credito = plazo_credito_años * 12
                     cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
                     cuota_mensual_credito = math.ceil(cuota_mensual_credito)
-                
-                desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
-                
+
+                desembolso_inicial_cliente = val_total - monto_a_financiar
+
                 # RECALCULAR FLUJO DE CAJA COMPLETO con el precio manual
                 fcl = []  # Reiniciar flujo de caja
                 for i in range(life):
@@ -2635,32 +2637,32 @@ def render_desktop_interface():
                             else:
                                 ahorro_mes = gen_mes * costkWh
                             ahorro_anual_total += ahorro_mes
-                    
+
                     # Aplicar indexación
                     ahorro_anual_indexado = ahorro_anual_total * ((1 + index_input / 100) ** i)
-                    if i == 0: 
+                    if i == 0:
                         ahorro_año1 = ahorro_anual_total
-                    
+
                     # Mantenimiento anual
                     mantenimiento_anual = 0.05 * ahorro_anual_indexado
-                    
+
                     # Cuotas anuales del crédito
                     cuotas_anuales_credito = 0
-                    if i < plazo_credito_años: 
+                    if i < plazo_credito_años:
                         cuotas_anuales_credito = cuota_mensual_credito * 12
-                    
+
                     # Flujo anual
                     flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
                     fcl.append(flujo_anual)
-                
+
                 # Insertar desembolso inicial al inicio
                 fcl.insert(0, -desembolso_inicial_cliente)
-                
+
                 # Recalcular métricas financieras
                 valor_presente = npf.npv(dRate_input / 100, fcl)
                 tasa_interna = npf.irr(fcl)
-                
-                st.success(f"✅ **Precio Manual Aplicado**: ${valor_proyecto_total:,.0f} COP")
+
+                st.success(f"✅ **Precio Manual Aplicado**: ${val_total:,.0f} COP")
                 st.info("🔄 **Flujo de caja recalculado** con el precio manual para métricas correctas")
             
             generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
@@ -2687,7 +2689,9 @@ def render_desktop_interface():
             st.info(f"📅 **Análisis financiero a {horizonte_tiempo} años** - TIR, VPN y Payback calculados para este período")
             
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Valor del Proyecto", f"${valor_proyecto_total:,.0f}")
+            # Usar val_total si precio manual está activado, de lo contrario usar valor_proyecto_total
+            valor_mostrar = val_total if (precio_manual and precio_manual_valor) else valor_proyecto_total
+            col1.metric("Valor del Proyecto", f"${valor_mostrar:,.0f}")
             col2.metric("TIR", f"{tasa_interna:.1%}")
             col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
             if incluir_baterias:
@@ -2799,11 +2803,13 @@ def render_desktop_interface():
 
             with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
                 st.subheader("Desglose Basado en Promedios Históricos")
-                presupuesto_equipos = valor_proyecto_total * (PROMEDIOS_COSTO['Equipos'] / 100)
-                presupuesto_materiales = valor_proyecto_total * (PROMEDIOS_COSTO['Materiales'] / 100)
-                provision_iva_guia = valor_proyecto_total * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
-                ganancia_estimada_guia = valor_proyecto_total * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
-                st.info(f"""Basado en el **Valor Total del Proyecto de ${valor_proyecto_total:,.0f} COP**, el presupuesto guía según tu historial es:""")
+                # Usar precio manual si está activado para el presupuesto también
+                valor_base_presupuesto = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
+                presupuesto_equipos = valor_base_presupuesto * (PROMEDIOS_COSTO['Equipos'] / 100)
+                presupuesto_materiales = valor_base_presupuesto * (PROMEDIOS_COSTO['Materiales'] / 100)
+                provision_iva_guia = valor_base_presupuesto * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
+                ganancia_estimada_guia = valor_base_presupuesto * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
+                st.info(f"""Basado en el **Valor Total del Proyecto de ${valor_base_presupuesto:,.0f} COP**, el presupuesto guía según tu historial es:""")
                 col_guia1, col_guia2, col_guia3, col_guia4 = st.columns(4)
                 col_guia1.metric(f"Equipos ({PROMEDIOS_COSTO['Equipos']:.2f}%)", f"${math.ceil(presupuesto_equipos):,.0f}")
                 col_guia2.metric(f"Materiales ({PROMEDIOS_COSTO['Materiales']:.2f}%)", f"${math.ceil(presupuesto_materiales):,.0f}")
