@@ -97,6 +97,9 @@ class ProjectManager:
 
             self.spreadsheet_id = spreadsheet.get('spreadsheetId')
 
+            if not self.spreadsheet_id:
+                raise Exception("Failed to get spreadsheet ID from creation response")
+
             # Set up headers
             self._setup_sheet_headers()
 
@@ -105,6 +108,8 @@ class ProjectManager:
 
         except Exception as e:
             print(f"Error creating spreadsheet: {e}")
+            self.spreadsheet_id = None
+            raise
 
     def _setup_sheet_headers(self):
         """Set up headers for all sheets"""
