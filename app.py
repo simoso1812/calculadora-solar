@@ -3320,8 +3320,8 @@ def render_desktop_interface():
                     else:
                         cuota_mensual_pdf = 0
                 else:
-                    monto_a_financiar_pdf = monto_a_financiar_redondeado
-                    desembolso_inicial_pdf = desembolso_inicial_redondeado
+                    monto_a_financiar_pdf = math.ceil(monto_a_financiar)
+                    desembolso_inicial_pdf = math.ceil(desembolso_inicial_cliente)
                     cuota_mensual_pdf = cuota_mensual_credito
 
                 datos_para_pdf["--- Detalles de Financiamiento ---"] = ""
