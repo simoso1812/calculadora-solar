@@ -26,55 +26,116 @@ class ProjectManager:
     def _initialize_sheets_service(self):
         """Initialize Google Sheets service"""
         try:
+            # Debug: Check if credentials are available
+            refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN")
+            client_id = os.environ.get("GOOGLE_CLIENT_ID")
+            client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+            
+            print(f"[DEBUG] Initializing Google Sheets service...")
+            print(f"[DEBUG] Client ID present: {bool(client_id)}")
+            print(f"[DEBUG] Client Secret present: {bool(client_secret)}")
+            print(f"[DEBUG] Refresh Token present: {bool(refresh_token)}")
+            
+            if not all([refresh_token, client_id, client_secret]):
+                print("[ERROR] Missing Google credentials in environment variables")
+                self.service = None
+                return
+                
             creds = Credentials(
                 None,
-                refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
+                refresh_token=refresh_token,
                 token_uri='https://oauth2.googleapis.com/token',
-                client_id=os.environ.get("GOOGLE_CLIENT_ID"),
-                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+                client_id=client_id,
+                client_secret=client_secret,
                 scopes=['https://www.googleapis.com/auth/spreadsheets',
                        'https://www.googleapis.com/auth/drive']
             )
+            
+            print("[DEBUG] Building Google Sheets service...")
             self.service = build('sheets', 'v4', credentials=creds)
+            
+            print("[DEBUG] Building Google Drive service...")
             self.drive_service = build('drive', 'v3', credentials=creds)
 
             # Get or create spreadsheet
             self.spreadsheet_id = os.environ.get("PROJECTS_SPREADSHEET_ID")
+            print(f"[DEBUG] Existing spreadsheet ID: {self.spreadsheet_id}")
+            
             if not self.spreadsheet_id:
+                print("[DEBUG] No spreadsheet ID found, creating new one...")
                 self._create_projects_spreadsheet()
+            else:
+                # Verify the spreadsheet exists and is accessible
+                try:
+                    print(f"[DEBUG] Verifying access to spreadsheet {self.spreadsheet_id}...")
+                    spreadsheet = self.service.spreadsheets().get(
+                        spreadsheetId=self.spreadsheet_id
+                    ).execute()
+                    print(f"[DEBUG] Successfully connected to: {spreadsheet.get('properties', {}).get('title')}")
+                except Exception as e:
+                    print(f"[ERROR] Cannot access spreadsheet {self.spreadsheet_id}: {e}")
+                    print("[DEBUG] Creating new spreadsheet...")
+                    self._create_projects_spreadsheet()
 
             # Check parent folder access
             self._check_parent_folder_access()
+            
+            print("[DEBUG] Google Sheets service initialized successfully")
 
         except Exception as e:
-            print(f"Error initializing Google Sheets: {e}")
+            print(f"[ERROR] Critical error initializing Google Sheets: {e}")
+            import traceback
+            print(f"[ERROR] Full traceback:\n{traceback.format_exc()}")
             self.service = None
 
     def _check_parent_folder_access(self):
-        """Check if we can access the parent folder, provide fallback if not"""
+        """Check if we can access the parent folder, create it if it doesn't exist"""
         parent_folder_id = os.environ.get('PARENT_FOLDER_ID')
 
+        if parent_folder_id:
+            try:
+                # Try to access the folder
+                folder = self.drive_service.files().get(
+                    fileId=parent_folder_id,
+                    fields='name, id'
+                ).execute()
+                print(f"Parent folder accessible: {folder.get('name')}")
+                self.parent_folder_accessible = True
+                return
+            except HttpError as e:
+                if e.resp.status == 404:
+                    print(f"Parent folder {parent_folder_id} not found. Creating a new one.")
+                    parent_folder_id = None
+                else:
+                    print(f"Cannot access parent folder {parent_folder_id}: {e}")
+                    self.parent_folder_accessible = False
+                    return
+        
         if not parent_folder_id:
-            print("No PARENT_FOLDER_ID specified - Google Drive folder operations will be limited")
-            self.parent_folder_accessible = False
-            return
-
-        try:
-            # Try to access the folder
-            folder = self.drive_service.files().get(
-                fileId=parent_folder_id,
-                fields='name, id'
-            ).execute()
-
-            print(f"Parent folder accessible: {folder.get('name')}")
-            self.parent_folder_accessible = True
-
-        except Exception as e:
-            print(f"Cannot access parent folder {parent_folder_id}: {e}")
-            print("This is normal if the folder was created with different OAuth credentials")
-            print("The app will work with limited Google Drive functionality")
-            print("You can still save/load projects and generate financial summaries")
-            self.parent_folder_accessible = False
+            print("No PARENT_FOLDER_ID specified or accessible, creating a new one...")
+            try:
+                folder_metadata = {
+                    'name': 'Solar Calculator Projects',
+                    'mimeType': 'application/vnd.google-apps.folder'
+                }
+                folder = self.drive_service.files().create(
+                    body=folder_metadata,
+                    fields='id'
+                ).execute()
+                new_folder_id = folder.get('id')
+                
+                if new_folder_id:
+                    print(f"Created new parent folder: {new_folder_id}")
+                    # Update .env file
+                    with open('.env', 'a') as f:
+                        f.write(f"\nPARENT_FOLDER_ID={new_folder_id}")
+                    os.environ['PARENT_FOLDER_ID'] = new_folder_id
+                    self.parent_folder_accessible = True
+                else:
+                    self.parent_folder_accessible = False
+            except Exception as e:
+                print(f"Error creating new parent folder: {e}")
+                self.parent_folder_accessible = False
 
     def _create_projects_spreadsheet(self):
         """Create a new spreadsheet for projects"""
@@ -148,7 +209,12 @@ class ProjectManager:
             Project ID
         """
         if not self.service:
-            raise Exception("Google Sheets service not available")
+            print("[ERROR] Attempting to save project but Google Sheets service is not available")
+            print("[DEBUG] Please check:")
+            print("  1. Google credentials are correctly set in environment variables")
+            print("  2. The Google Cloud project has Sheets API enabled")
+            print("  3. The OAuth credentials have the correct scopes")
+            raise Exception("Google Sheets service not available - check console for debug information")
 
         project_id = f"PRJ{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
 
@@ -270,7 +336,8 @@ class ProjectManager:
             Project data dictionary
         """
         if not self.service:
-            raise Exception("Google Sheets service not available")
+            print("[ERROR] Attempting to load project but Google Sheets service is not available")
+            raise Exception("Google Sheets service not available - check console for debug information")
 
         # Get all projects
         result = self.service.spreadsheets().values().get(
@@ -338,7 +405,8 @@ class ProjectManager:
             List of scenario dictionaries
         """
         if not self.service:
-            raise Exception("Google Sheets service not available")
+            print("[ERROR] Attempting to get scenarios but Google Sheets service is not available")
+            raise Exception("Google Sheets service not available - check console for debug information")
 
         # Get all scenarios
         result = self.service.spreadsheets().values().get(
@@ -373,7 +441,13 @@ class ProjectManager:
             List of project dictionaries
         """
         if not self.service:
-            raise Exception("Google Sheets service not available")
+            print("[ERROR] Attempting to list projects but Google Sheets service is not available")
+            print("[DEBUG] This means the project management system could not initialize")
+            print("[DEBUG] However, you can still:")
+            print("  - Use the calculator for new projects")
+            print("  - Save PDFs and contracts to Google Drive")
+            print("  - Generate financial summaries")
+            raise Exception("Google Sheets service not available - project management disabled")
 
         # Get all projects
         result = self.service.spreadsheets().values().get(
