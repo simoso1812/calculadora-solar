@@ -234,22 +234,41 @@ class FinancialSummaryGenerator:
 
         pdf.set_font(self.font_family, '', 10)
 
-        if 'results_data' in calculation_data:
+        if 'results_data' in calculation_data and 'input_data' in calculation_data:
             results = calculation_data['results_data']
+            inputs = calculation_data['input_data']
+
+            # Energy metrics
+            pdf.cell(0, 8, 'MÉTRICAS ENERGÉTICAS:', 0, 1, 'L')
+            pdf.cell(0, 6, f"• Costo kWh: ${inputs.get('costkWh', 0):,.0f} COP", 0, 1)
+            
+            # Calculate surplus percentage
+            consumo_anual = inputs.get('Load', 0) * 12
+            generacion_anual = sum(results.get('monthly_generation', []))
+            if consumo_anual > 0 and generacion_anual > consumo_anual:
+                excedente_anual = generacion_anual - consumo_anual
+                porcentaje_excedente = (excedente_anual / generacion_anual) * 100
+                pdf.cell(0, 6, f"• Porcentaje de Excedentes Anual: {porcentaje_excedente:.1f}%", 0, 1)
+            else:
+                pdf.cell(0, 6, "• Porcentaje de Excedentes Anual: 100% Autoconsumo", 0, 1)
+
+            pdf.ln(5)
 
             # Technical metrics
             pdf.cell(0, 8, 'MÉTRICAS TÉCNICAS:', 0, 1, 'L')
-            pdf.cell(0, 6, f"• Capacidad Instalada: {results.get('size', 0):.1f} kWp", 0, 1)
-            pdf.cell(0, 6, f"• Generación Anual: {results.get('generacion_anual', 0):,.0f} kWh", 0, 1)
-            pdf.cell(0, 6, f"• Eficiencia del Sistema: {results.get('eficiencia', 0):.1%}", 0, 1)
+            pdf.cell(0, 6, f"• Capacidad Instalada: {results.get('size_calc', 0):.1f} kWp", 0, 1)
+            pdf.cell(0, 6, f"• Generación Anual: {generacion_anual:,.0f} kWh", 0, 1)
+            pdf.cell(0, 6, f"• Eficiencia del Sistema: {results.get('n_final', 0):.1%}", 0, 1)
 
             pdf.ln(5)
 
             # Environmental metrics
-            pdf.cell(0, 8, 'MÉTRICAS AMBIENTALES:', 0, 1, 'L')
-            pdf.cell(0, 6, f"• CO2 Evitado Anual: {results.get('co2_anual', 0):,.0f} kg", 0, 1)
-            pdf.cell(0, 6, f"• Árboles Equivalentes: {results.get('arboles', 0):.0f}", 0, 1)
-            pdf.cell(0, 6, f"• Valor Carbono: ${results.get('valor_carbono', 0):,.0f} COP", 0, 1)
+            if results.get('carbon_data'):
+                carbon = results['carbon_data']
+                pdf.cell(0, 8, 'MÉTRICAS AMBIENTALES:', 0, 1, 'L')
+                pdf.cell(0, 6, f"• CO2 Evitado Anual: {carbon.get('annual_co2_avoided_tons', 0):.1f} ton", 0, 1)
+                pdf.cell(0, 6, f"• Árboles Equivalentes: {carbon.get('trees_saved_per_year', 0):.0f}", 0, 1)
+                pdf.cell(0, 6, f"• Valor Carbono: ${carbon.get('annual_certification_value_cop', 0):,.0f} COP", 0, 1)
 
             pdf.ln(5)
 
@@ -257,7 +276,7 @@ class FinancialSummaryGenerator:
             pdf.cell(0, 8, 'MÉTRICAS DE RIESGO:', 0, 1, 'L')
             pdf.cell(0, 6, f"• Ratio Deuda/Capital: {results.get('debt_equity_ratio', 0):.2f}", 0, 1)
             pdf.cell(0, 6, f"• Cobertura de Intereses: {results.get('interest_coverage', 0):.1f}x", 0, 1)
-            pdf.cell(0, 6, f"• Punto de Equilibrio: {results.get('break_even_year', 0)} años", 0, 1)
+            pdf.cell(0, 6, f"• Punto de Equilibrio: {results.get('payback_exacto', 0):.1f} años", 0, 1)
 
         pdf.ln(10)
 
