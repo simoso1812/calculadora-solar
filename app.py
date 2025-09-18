@@ -2852,8 +2852,10 @@ def render_desktop_interface():
                     project_data = st.session_state['loaded_project']
                     calculation_data = st.session_state.get('loaded_calculation', {})
 
+                    # Ensure the most recent calculation data is used
+                    calculation_data_to_pass = st.session_state.get('current_calculation', calculation_data)
                     pdf_bytes = financial_summary_generator.generate_financial_summary(
-                        project_data, calculation_data=calculation_data
+                        project_data, calculation_data=calculation_data_to_pass
                     )
 
                     filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
