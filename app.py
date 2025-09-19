@@ -2854,6 +2854,15 @@ def render_desktop_interface():
 
                     # Ensure the most recent calculation data is used
                     calculation_data_to_pass = st.session_state.get('current_calculation', calculation_data)
+                    # Debug log to check the data being passed
+                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
+                    
+                    # Debug log to check the data being passed
+                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
+                    
+                    # Debug log to check the data being passed
+                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
+                    
                     pdf_bytes = financial_summary_generator.generate_financial_summary(
                         project_data, calculation_data=calculation_data_to_pass
                     )

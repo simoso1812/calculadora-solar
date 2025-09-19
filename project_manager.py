@@ -48,7 +48,8 @@ class ProjectManager:
                 client_id=client_id,
                 client_secret=client_secret,
                 scopes=['https://www.googleapis.com/auth/spreadsheets',
-                       'https://www.googleapis.com/auth/drive']
+                       'https://www.googleapis.com/auth/drive',
+                       'https://www.googleapis.com/auth/drive.file']
             )
             
             print("[DEBUG] Building Google Sheets service...")
