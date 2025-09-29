@@ -37,13 +37,11 @@ except ImportError:
     st.warning("⚠️ Módulo de cálculo de carbono no encontrado. Las funcionalidades de sostenibilidad estarán limitadas.")
     carbon_calculator = None
 
-# Import project management and financial summary modules
+# Import financial summary module
 try:
-    from project_manager import project_manager
     from financial_summary import financial_summary_generator
 except ImportError as e:
-    st.error(f"Error importing project management modules: {e}")
-    project_manager = None
+    st.error(f"Error importing financial summary module: {e}")
     financial_summary_generator = None
 
 # ==============================================================================
@@ -1546,8 +1544,8 @@ def render_mobile_interface():
         """)
     
     # Tabs principales con Ubicación
-    tab1, tabUbic, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "👤 Cliente", "📍 Ubicación", "⚡ Sistema", "💰 Finanzas", "📊 Resultados", "📁 Archivos", "🔌 Cargadores", "💼 Financiero"
+    tab1, tabUbic, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "👤 Cliente", "📍 Ubicación", "⚡ Sistema", "💰 Finanzas", "📊 Resultados", "📁 Archivos", "🔌 Cargadores"
     ])
     
     with tab1:
@@ -1564,8 +1562,6 @@ def render_mobile_interface():
         render_tab_archivos_mobile()
     with tab6:
         render_tab_cargadores_mobile()
-    with tab7:
-        render_tab_financiero_mobile()
 
 def render_tab_cliente_mobile():
     """Tab de cliente para interfaz móvil"""
@@ -1877,6 +1873,7 @@ def render_tab_resultados_mobile():
         st.info("Los resultados detallados de sostenibilidad se mostrarán al generar la propuesta en el tab '📁 Archivos'.")
 
     st.info("Los resultados detallados se mostrarán al generar la propuesta en el tab '📁 Archivos'.")
+
 
 def render_tab_archivos_mobile():
     """Generación real de propuesta, contrato, gráficos y subida a Drive"""
@@ -2191,155 +2188,6 @@ def render_tab_cargadores_mobile():
         except Exception as ex:
             st.error(f"❌ Error generando la cotización de cargadores: {ex}")
 
-def render_tab_financiero_mobile():
-    """Pestaña móvil para gestión financiera y proyectos."""
-    st.header("💼 Gestión Financiera y Proyectos")
-
-    if not project_manager or not financial_summary_generator:
-        st.warning("⚠️ Módulos de gestión financiera no disponibles")
-        return
-
-    # Sub-tabs for financial management
-    fin_tab1, fin_tab2, fin_tab3 = st.tabs(["📊 Resumen Financiero", "💾 Gestionar Proyectos", "📈 Dashboard"])
-
-    with fin_tab1:
-        st.subheader("📊 Generar Resumen Financiero")
-
-        if 'loaded_project' in st.session_state and 'loaded_calculation' in st.session_state:
-            project_data = st.session_state['loaded_project']
-            calculation_data = st.session_state['loaded_calculation']
-
-            st.info(f"📋 Proyecto: {project_data.get('project_name', 'N/A')}")
-
-            # Quick financial metrics
-            if 'results_data' in calculation_data:
-                results = calculation_data['results_data']
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("TIR", f"{results.get('tasa_interna', 0):.1%}")
-                    st.metric("VPN", f"${results.get('valor_presente', 0):,.0f}")
-                with col2:
-                    st.metric("Payback", f"{results.get('payback_exacto', 0):.1f} años")
-                    st.metric("Valor Proyecto", f"${results.get('valor_proyecto_total', 0):,.0f}")
-
-            # Generate detailed reports
-            col_pdf, col_excel = st.columns(2)
-            with col_pdf:
-                if st.button("📄 Generar PDF Completo", use_container_width=True, key="mobile_gen_pdf"):
-                    try:
-                        pdf_bytes = financial_summary_generator.generate_financial_summary(
-                            project_data, calculation_data=calculation_data
-                        )
-                        filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-                        st.download_button(
-                            label="📥 Descargar PDF",
-                            data=pdf_bytes,
-                            file_name=filename,
-                            mime="application/pdf",
-                            use_container_width=True,
-                            key="mobile_download_pdf"
-                        )
-                        st.success("✅ PDF generado")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-
-            with col_excel:
-                if st.button("📊 Generar Excel", use_container_width=True, key="mobile_gen_excel"):
-                    try:
-                        excel_bytes = financial_summary_generator.generate_excel_summary(
-                            project_data, calculation_data=calculation_data
-                        )
-                        filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx"
-                        st.download_button(
-                            label="📥 Descargar Excel",
-                            data=excel_bytes,
-                            file_name=filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
-                            key="mobile_download_excel"
-                        )
-                        st.success("✅ Excel generado")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-        else:
-            st.warning("⚠️ Carge un proyecto primero para generar resumenes financieros")
-
-    with fin_tab2:
-        st.subheader("💾 Gestionar Proyectos")
-
-        # Save current project
-        if st.button("💾 Guardar Proyecto Actual", use_container_width=True, key="mobile_save_project"):
-            try:
-                if 'current_calculation' in st.session_state:
-                    project_data = {
-                        'client_name': st.session_state.get('cliente_data', {}).get('nombre', 'Cliente Móvil'),
-                        'project_name': f"Proyecto Móvil {datetime.datetime.now().strftime('%Y%m%d')}",
-                        'location': st.session_state.get('ciudad_mobile', 'Bogotá'),
-                        'base_calculation_id': ''
-                    }
-
-                    project_id = project_manager.save_project(project_data)
-
-                    # Save calculation
-                    calc_data = st.session_state['current_calculation']
-                    calc_id = project_manager.save_calculation(
-                        project_id,
-                        calc_data.get('input_data', {}),
-                        calc_data.get('results_data', {})
-                    )
-
-                    st.success(f"✅ Proyecto guardado: {project_id}")
-                else:
-                    st.warning("⚠️ Realice un cálculo primero")
-            except Exception as e:
-                st.error(f"❌ Error guardando proyecto: {e}")
-
-        # Load project
-        st.subheader("📂 Cargar Proyecto")
-        try:
-            projects = project_manager.list_projects('Active')
-            if projects:
-                project_names = [f"{p['project_id']} - {p['client_name']}" for p in projects]
-                selected = st.selectbox("Seleccionar proyecto:", project_names, key="mobile_project_select")
-
-                if selected and st.button("📂 Cargar Proyecto", use_container_width=True, key="mobile_load_project"):
-                    project_id = selected.split(' - ')[0]
-                    project_data = project_manager.load_project(project_id)
-
-                    if project_data.get('base_calculation_id'):
-                        calc_data = project_manager.load_calculation(project_data['base_calculation_id'])
-                        st.session_state['loaded_project'] = project_data
-                        st.session_state['loaded_calculation'] = calc_data
-
-                    st.success(f"✅ Proyecto '{project_data['project_name']}' cargado")
-            else:
-                st.info("No hay proyectos guardados")
-        except Exception as e:
-            st.error(f"Error cargando proyectos: {e}")
-
-    with fin_tab3:
-        st.subheader("📈 Dashboard de Proyectos")
-
-        try:
-            projects = project_manager.list_projects()
-            if projects:
-                # Statistics
-                total = len(projects)
-                active = len([p for p in projects if p['status'] == 'Active'])
-
-                col1, col2 = st.columns(2)
-                col1.metric("Total Proyectos", total)
-                col2.metric("Proyectos Activos", active)
-
-                # Recent projects
-                st.subheader("Proyectos Recientes")
-                recent_projects = sorted(projects, key=lambda x: x['created_date'], reverse=True)[:5]
-                for project in recent_projects:
-                    st.write(f"• **{project['project_name']}** - {project['client_name']} ({project['created_date'][:10]})")
-            else:
-                st.info("No hay proyectos para mostrar")
-        except Exception as e:
-            st.error(f"Error cargando dashboard: {e}")
 
 def render_desktop_interface():
     """Interfaz optimizada para desktop (tu interfaz actual)"""
@@ -2654,70 +2502,6 @@ def render_desktop_interface():
                 - Los cálculos son aproximados y pueden variar según condiciones reales
                 """)
 
-            # Opción para exportar como PDF simple
-            if st.button("📄 Generar Resumen Financiero (PDF)", key="export_financial_pdf"):
-                try:
-                    from fpdf import FPDF
-                    import datetime as dt
-
-                    class FinancialSummaryPDF(FPDF):
-                        def header(self):
-                            self.set_font('Arial', 'B', 16)
-                            self.cell(0, 10, 'Resumen Financiero para Análisis', 0, 1, 'C')
-                            self.ln(10)
-
-                        def footer(self):
-                            self.set_y(-15)
-                            self.set_font('Arial', 'I', 8)
-                            self.cell(0, 10, f'Generado el {dt.datetime.now().strftime("%d/%m/%Y %H:%M")}', 0, 0, 'C')
-
-                    pdf = FinancialSummaryPDF()
-                    pdf.add_page()
-                    pdf.set_font('Arial', '', 12)
-
-                    # Contenido del PDF
-                    pdf.cell(0, 10, f'Cliente: {nombre_cliente}', 0, 1)
-                    pdf.cell(0, 10, f'Proyecto: {ubicacion or "Sin especificar"}', 0, 1)
-                    pdf.cell(0, 10, f'Fecha: {fecha_propuesta.strftime("%d/%m/%Y")}', 0, 1)
-                    pdf.ln(10)
-
-                    pdf.set_font('Arial', 'B', 14)
-                    pdf.cell(0, 10, 'Métricas Financieras Clave', 0, 1)
-                    pdf.ln(5)
-
-                    pdf.set_font('Arial', '', 12)
-                    # Usar precio manual si está activado para el PDF también
-                    precio_pdf = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
-                    pdf.cell(0, 8, f'Precio del Proyecto: ${precio_pdf:,.0f} COP', 0, 1)
-                    pdf.cell(0, 8, f'O&M Anual: ${om_anual:,.0f} COP', 0, 1)
-                    pdf.cell(0, 8, f'Generación Anual Inicial: {generacion_anual_inicial:,.0f} kWh', 0, 1)
-                    pdf.cell(0, 8, f'Degradación Anual: {tasa_degradacion_anual:.1f}%', 0, 1)
-                    pdf.ln(10)
-
-                    pdf.set_font('Arial', 'B', 14)
-                    pdf.cell(0, 10, 'Parámetros Técnicos', 0, 1)
-                    pdf.ln(5)
-
-                    pdf.set_font('Arial', '', 12)
-                    pdf.cell(0, 8, f'Tamaño del Sistema: {size_calc:.1f} kWp', 0, 1)
-                    pdf.cell(0, 8, f'Cantidad de Paneles: {int(quantity_calc)}', 0, 1)
-                    pdf.cell(0, 8, f'Potencia por Panel: {module} Wp', 0, 1)
-                    pdf.cell(0, 8, f'HSP Promedio: {hsp_promedio:.2f} kWh/m²/día', 0, 1)
-                    pdf.cell(0, 8, f'Tipo de Cubierta: {cubierta}', 0, 1)
-                    pdf.cell(0, 8, f'Ubicación: {ciudad_input}', 0, 1)
-
-                    pdf_bytes = bytes(pdf.output(dest='S'))
-
-                    st.download_button(
-                        label="📥 Descargar Resumen Financiero (PDF)",
-                        data=pdf_bytes,
-                        file_name=f"Resumen_Financiero_{nombre_cliente}_{dt.datetime.now().strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf",
-                        key="download_financial_pdf"
-                    )
-
-                except Exception as e:
-                    st.error(f"Error generando PDF financiero: {e}")
 
         st.markdown("---")
         st.subheader("🔌 Cotizador de Cargadores")
@@ -2739,171 +2523,7 @@ def render_desktop_interface():
             except Exception as ev_ex:
                 st.error(f"❌ Error generando la cotización de cargadores: {ev_ex}")
 
-        # ==============================================================================
-        # PROJECT MANAGEMENT SYSTEM
-        # ==============================================================================
-        st.markdown("---")
-        st.header("📁 GESTIÓN DE PROYECTOS")
 
-        if project_manager:
-            # Project Management Tabs
-            proj_tab1, proj_tab2, proj_tab3 = st.tabs(["💾 Guardar Proyecto", "📂 Cargar Proyecto", "📊 Dashboard"])
-
-            with proj_tab1:
-                st.subheader("💾 Guardar Proyecto Actual")
-                if st.button("Guardar Proyecto", use_container_width=True):
-                    try:
-                        # Get current project data from session state or form inputs
-                        project_data = {
-                            'client_name': nombre_cliente,
-                            'project_name': ubicacion or f"Proyecto {datetime.datetime.now().strftime('%Y%m%d')}",
-                            'location': ciudad_input,
-                            'base_calculation_id': st.session_state.get('current_calculation_id', '')
-                        }
-
-                        project_id = project_manager.save_project(project_data)
-                        st.success(f"✅ Proyecto guardado con ID: {project_id}")
-
-                        # Save current calculation if available
-                        if 'current_calculation' in st.session_state:
-                            calc_data = st.session_state['current_calculation']
-                            calc_id = project_manager.save_calculation(
-                                project_id,
-                                calc_data.get('input_data', {}),
-                                calc_data.get('results_data', {})
-                            )
-                            st.info(f"Cálculo base guardado con ID: {calc_id}")
-
-                    except Exception as e:
-                        st.error(f"❌ Error guardando proyecto: {e}")
-
-            with proj_tab2:
-                st.subheader("📂 Cargar Proyecto Existente")
-
-                # List available projects
-                try:
-                    projects = project_manager.list_projects('Active')
-                    if projects:
-                        project_options = [f"{p['project_id']} - {p['client_name']} - {p['project_name']}"
-                                         for p in projects]
-                        selected_project = st.selectbox("Seleccionar Proyecto:", project_options)
-
-                        if selected_project and st.button("Cargar Proyecto", use_container_width=True):
-                            project_id = selected_project.split(' - ')[0]
-                            project_data = project_manager.load_project(project_id)
-
-                            # Load base calculation
-                            if project_data.get('base_calculation_id'):
-                                try:
-                                    calc_data = project_manager.load_calculation(project_data['base_calculation_id'])
-                                    st.session_state['loaded_project'] = project_data
-                                    st.session_state['loaded_calculation'] = calc_data
-                                    st.success(f"✅ Proyecto '{project_data['project_name']}' cargado exitosamente")
-                                except Exception as e:
-                                    st.warning(f"No se pudo cargar el cálculo base: {e}")
-                            else:
-                                st.session_state['loaded_project'] = project_data
-                                st.success(f"✅ Proyecto '{project_data['project_name']}' cargado exitosamente")
-                    else:
-                        st.info("No hay proyectos guardados aún.")
-                except Exception as e:
-                    st.error(f"Error cargando proyectos: {e}")
-
-            with proj_tab3:
-                st.subheader("📊 Dashboard de Proyectos")
-
-                try:
-                    projects = project_manager.list_projects()
-                    if projects:
-                        # Project statistics
-                        total_projects = len(projects)
-                        active_projects = len([p for p in projects if p['status'] == 'Active'])
-
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Proyectos", total_projects)
-                        col2.metric("Proyectos Activos", active_projects)
-                        col3.metric("Proyectos Archivados", total_projects - active_projects)
-
-                        # Projects table
-                        st.subheader("Lista de Proyectos")
-                        projects_df = pd.DataFrame(projects)
-                        st.dataframe(projects_df[['project_id', 'client_name', 'project_name',
-                                                'location', 'created_date', 'status']], use_container_width=True)
-                    else:
-                        st.info("No hay proyectos para mostrar.")
-                except Exception as e:
-                    st.error(f"Error cargando dashboard: {e}")
-        else:
-            st.warning("⚠️ Sistema de gestión de proyectos no disponible. Verifique la configuración de Google Sheets.")
-
-    # ==============================================================================
-    # FINANCIAL SUMMARY GENERATOR
-    # ==============================================================================
-    st.markdown("---")
-    st.subheader("💼 GENERADOR DE RESUMENES FINANCIEROS")
-
-    if financial_summary_generator and 'loaded_project' in st.session_state:
-        st.info("📊 Proyecto cargado - Puede generar resumen financiero")
-
-        col_fs1, col_fs2 = st.columns(2)
-        with col_fs1:
-            if st.button("📄 Generar Resumen Financiero (PDF)", use_container_width=True, key="gen_financial_pdf"):
-                try:
-                    project_data = st.session_state['loaded_project']
-                    calculation_data = st.session_state.get('loaded_calculation', {})
-
-                    # Ensure the most recent calculation data is used
-                    calculation_data_to_pass = st.session_state.get('current_calculation', calculation_data)
-                    # Debug log to check the data being passed
-                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
-                    
-                    # Debug log to check the data being passed
-                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
-                    
-                    # Debug log to check the data being passed
-                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
-                    
-                    pdf_bytes = financial_summary_generator.generate_financial_summary(
-                        project_data, calculation_data=calculation_data_to_pass
-                    )
-
-                    filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-                    st.download_button(
-                        label="📥 Descargar Resumen Financiero (PDF)",
-                        data=pdf_bytes,
-                        file_name=filename,
-                        mime="application/pdf",
-                        use_container_width=True,
-                        key="download_financial_pdf"
-                    )
-                    st.success("✅ Resumen financiero generado exitosamente")
-
-                except Exception as e:
-                    st.error(f"❌ Error generando resumen financiero: {e}")
-
-        with col_fs2:
-            if st.button("📊 Generar Resumen Financiero (Excel)", use_container_width=True, key="gen_financial_excel"):
-                try:
-                    project_data = st.session_state['loaded_project']
-                    calculation_data = st.session_state.get('loaded_calculation', {})
-
-                    excel_bytes = financial_summary_generator.generate_excel_summary(
-                        project_data, calculation_data=calculation_data
-                    )
-
-                    filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx"
-                    st.download_button(
-                        label="📥 Descargar Resumen Financiero (Excel)",
-                        data=excel_bytes,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        key="download_financial_excel"
-                    )
-                    st.success("✅ Resumen financiero en Excel generado exitosamente")
-
-                except Exception as e:
-                    st.error(f"❌ Error generando resumen financiero en Excel: {e}")
 
     # ==============================================================================
     # LÓGICA DE CÁLCULO Y VISUALIZACIÓN (AL PRESIONAR EL BOTÓN)
@@ -2922,28 +2542,6 @@ def render_desktop_interface():
             nombre_proyecto = f"FV{str(datetime.datetime.now().year)[-2:]}{numero_proyecto_del_año:03d} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
             st.success(f"Proyecto Generado: {nombre_proyecto}")
 
-            # Store calculation data for project management
-            calculation_input = {
-                'Load': Load,
-                'size': size,
-                'quantity': quantity,
-                'cubierta': cubierta,
-                'clima': clima,
-                'costkWh': costkWh,
-                'module': module,
-                'ciudad': ciudad_para_calculo,
-                'hsp_data': hsp_a_usar,
-                'index_input': index_input,
-                'dRate_input': dRate_input,
-                'perc_financiamiento': perc_financiamiento,
-                'tasa_interes_input': tasa_interes_input,
-                'plazo_credito_años': plazo_credito_años,
-                'incluir_baterias': incluir_baterias,
-                'costo_kwh_bateria': costo_kwh_bateria,
-                'dias_autonomia': dias_autonomia,
-                'horizonte_tiempo': horizonte_tiempo,
-                'precio_manual': precio_manual_valor if precio_manual and precio_manual_valor else None
-            }
 
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
@@ -3026,39 +2624,8 @@ def render_desktop_interface():
                 else:
                     payback_exacto = float(payback_simple)
             
-            # Store calculation results for project management
-            calculation_results = {
-                'valor_proyecto_total': valor_proyecto_total,
-                'size_calc': size_calc,
-                'monto_a_financiar': monto_a_financiar,
-                'cuota_mensual_credito': cuota_mensual_credito,
-                'desembolso_inicial_cliente': desembolso_inicial_cliente,
-                'fcl': fcl,
-                'trees': trees,
-                'monthly_generation': monthly_generation,
-                'valor_presente': valor_presente,
-                'tasa_interna': tasa_interna,
-                'cantidad_calc': cantidad_calc,
-                'life': life,
-                'recomendacion_inversor': recomendacion_inversor,
-                'lcoe': lcoe,
-                'n_final': n_final,
-                'hsp_mensual_final': hsp_mensual_final,
-                'potencia_ac_inversor': potencia_ac_inversor,
-                'ahorro_año1': ahorro_año1,
-                'area_requerida': area_requerida,
-                'capacidad_nominal_bateria': capacidad_nominal_bateria,
-                'carbon_data': carbon_data,
-                'payback_exacto': payback_exacto,
-                'generacion_promedio_mensual': generacion_promedio_mensual
-            }
 
-            # Store in session state for project management
-            st.session_state['current_calculation'] = {
-                'input_data': calculation_input,
-                'results_data': calculation_results,
-                'timestamp': datetime.datetime.now().isoformat()
-            }
+
 
             # DEBUG: Mostrar información del cálculo principal
             print(f"\n=== DEBUG CÁLCULO PRINCIPAL ===")
