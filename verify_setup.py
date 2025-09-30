@@ -37,6 +37,63 @@ def check_env_file():
     print("[OK] All required environment variables are set")
     return True
 
+def test_google_sheets():
+    """Test Google Sheets integration"""
+    print("\n[CHECK] Testing Google Sheets integration...")
+
+    try:
+        from project_manager import project_manager
+
+        if project_manager.service is None:
+            print("[ERROR] Google Sheets service not available")
+            print("   Check your OAuth credentials in .env file")
+            return False
+
+        # Try to list projects (will be empty initially)
+        projects = project_manager.list_projects()
+        print("[OK] Google Sheets connected successfully")
+        print(f"   Found {len(projects)} existing projects")
+
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Google Sheets test failed: {e}")
+        return False
+
+def test_google_drive():
+    """Test Google Drive integration"""
+    print("\n[CHECK] Testing Google Drive integration...")
+
+    try:
+        from project_manager import project_manager
+
+        if project_manager.drive_service is None:
+            print("[ERROR] Google Drive service not available")
+            return False
+
+        # Check if parent folder exists
+        parent_folder_id = os.environ.get('PARENT_FOLDER_ID')
+        if not parent_folder_id:
+            print("[WARNING] PARENT_FOLDER_ID not set - Google Drive folder operations will be limited")
+            print("   The app will still work for project management and financial summaries")
+            return True
+
+        # Try to get folder info
+        folder = project_manager.drive_service.files().get(
+            fileId=parent_folder_id,
+            fields='name, id'
+        ).execute()
+
+        print("[OK] Google Drive connected successfully")
+        print(f"   Parent folder: {folder.get('name')} ({folder.get('id')})")
+        return True
+
+    except Exception as e:
+        print(f"[WARNING] Cannot access parent folder: {e}")
+        print("   This is normal if the folder was created with different OAuth credentials")
+        print("   The app will work with limited Google Drive functionality")
+        print("   You can still save/load projects and generate financial summaries")
+        return True  # Return True since the service works, just not the folder
 
 def test_project_manager():
     """Test Google Sheets project management"""
@@ -112,8 +169,13 @@ def main():
 
     tests = [
         ("Environment Variables", check_env_file),
+<<<<<<< HEAD
         ("Project Manager (Google Sheets)", test_project_manager),
         ("Google Drive", test_google_drive),
+=======
+        ("Google Sheets API", test_google_sheets),
+        ("Google Drive API", test_google_drive),
+>>>>>>> parent of 7c68b85 (project management deletion)
         ("Financial Summary", test_financial_summary)
     ]
 

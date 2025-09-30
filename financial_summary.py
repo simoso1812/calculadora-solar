@@ -234,78 +234,30 @@ class FinancialSummaryGenerator:
 
         pdf.set_font(self.font_family, '', 10)
 
-        # Debug: Print calculation data structure
-        print(f"[DEBUG] Calculation data keys: {calculation_data.keys() if calculation_data else 'None'}")
-        if calculation_data:
-            print(f"[DEBUG] Results data keys: {calculation_data.get('results_data', {}).keys() if calculation_data.get('results_data') else 'None'}")
-            print(f"[DEBUG] Input data keys: {calculation_data.get('input_data', {}).keys() if calculation_data.get('input_data') else 'None'}")
-
         if 'results_data' in calculation_data and 'input_data' in calculation_data:
             results = calculation_data['results_data']
             inputs = calculation_data['input_data']
 
             # Energy metrics
             pdf.cell(0, 8, 'MÉTRICAS ENERGÉTICAS:', 0, 1, 'L')
+            pdf.cell(0, 6, f"• Costo kWh: ${inputs.get('costkWh', 0):,.0f} COP", 0, 1)
             
-            # Price per kWh (from user input)
-            precio_kwh = inputs.get('costkWh', 0)
-            print(f"[DEBUG] Precio kWh from inputs: {precio_kwh}")
-            pdf.cell(0, 6, f"• Precio kWh Tarifa Actual: ${precio_kwh:,.0f} COP", 0, 1)
-            
-            # Calculate detailed consumption vs surplus distribution for first year
-            monthly_generation = results.get('monthly_generation', [])
-            monthly_consumption = inputs.get('Load', 0)  # Monthly consumption
-            print(f"[DEBUG] Monthly generation: {monthly_generation}")
-            print(f"[DEBUG] Monthly consumption: {monthly_consumption}")
-            
-            if monthly_generation and monthly_consumption > 0:
-                # Calculate monthly autoconsumption and surplus
-                total_autoconsumo = 0
-                total_excedentes = 0
-                
-                for gen_mensual in monthly_generation:
-                    if gen_mensual >= monthly_consumption:
-                        # More generation than consumption
-                        total_autoconsumo += monthly_consumption
-                        total_excedentes += (gen_mensual - monthly_consumption)
-                    else:
-                        # Less generation than consumption
-                        total_autoconsumo += gen_mensual
-                        total_excedentes += 0
-                
-                total_generacion_anual = sum(monthly_generation)
-                
-                if total_generacion_anual > 0:
-                    porcentaje_autoconsumo = (total_autoconsumo / total_generacion_anual) * 100
-                    porcentaje_excedentes = (total_excedentes / total_generacion_anual) * 100
-                    
-                    pdf.cell(0, 6, f"• Distribución Anual Año 1:", 0, 1)
-                    pdf.cell(0, 6, f"  - Autoconsumo: {porcentaje_autoconsumo:.1f}% ({total_autoconsumo:,.0f} kWh)", 0, 1)
-                    pdf.cell(0, 6, f"  - Excedentes: {porcentaje_excedentes:.1f}% ({total_excedentes:,.0f} kWh)", 0, 1)
-                else:
-                    pdf.cell(0, 6, "• Distribución Anual: No calculable", 0, 1)
+            # Calculate surplus percentage
+            consumo_anual = inputs.get('Load', 0) * 12
+            generacion_anual = sum(results.get('monthly_generation', []))
+            if consumo_anual > 0 and generacion_anual > consumo_anual:
+                excedente_anual = generacion_anual - consumo_anual
+                porcentaje_excedente = (excedente_anual / generacion_anual) * 100
+                pdf.cell(0, 6, f"• Porcentaje de Excedentes Anual: {porcentaje_excedente:.1f}%", 0, 1)
             else:
-                pdf.cell(0, 6, "• Distribución Anual: Datos insuficientes", 0, 1)
+                pdf.cell(0, 6, "• Porcentaje de Excedentes Anual: 100% Autoconsumo", 0, 1)
 
             pdf.ln(5)
 
-        else:
-            # Fallback when data is not available
-            pdf.cell(0, 8, 'MÉTRICAS ENERGÉTICAS:', 0, 1, 'L')
-            pdf.cell(0, 6, "• Datos de cálculo no disponibles", 0, 1)
-            pdf.ln(5)
-
-        # Technical metrics
-        if 'results_data' in calculation_data:
-            results = calculation_data['results_data']
+            # Technical metrics
             pdf.cell(0, 8, 'MÉTRICAS TÉCNICAS:', 0, 1, 'L')
             pdf.cell(0, 6, f"• Capacidad Instalada: {results.get('size_calc', 0):.1f} kWp", 0, 1)
-            
-            # Calculate total generation
-            monthly_generation = results.get('monthly_generation', [])
-            total_generacion_anual = sum(monthly_generation) if monthly_generation else 0
-            
-            pdf.cell(0, 6, f"• Generación Anual: {total_generacion_anual:,.0f} kWh", 0, 1)
+            pdf.cell(0, 6, f"• Generación Anual: {generacion_anual:,.0f} kWh", 0, 1)
             pdf.cell(0, 6, f"• Eficiencia del Sistema: {results.get('n_final', 0):.1%}", 0, 1)
 
             pdf.ln(5)
@@ -379,50 +331,16 @@ class FinancialSummaryGenerator:
             # Financial Metrics Sheet
             if calculation_data and 'results_data' in calculation_data:
                 results = calculation_data['results_data']
-                inputs = calculation_data.get('input_data', {})
-                
-                # Calculate additional metrics
-                monthly_generation = results.get('monthly_generation', [])
-                monthly_consumption = inputs.get('Load', 0)
-                
-                # Price per kWh
-                precio_kwh = inputs.get('costkWh', 0)
-                
-                # Calculate consumption vs surplus distribution
-                if monthly_generation and monthly_consumption > 0:
-                    total_autoconsumo = 0
-                    total_excedentes = 0
-                    
-                    for gen_mensual in monthly_generation:
-                        if gen_mensual >= monthly_consumption:
-                            total_autoconsumo += monthly_consumption
-                            total_excedentes += (gen_mensual - monthly_consumption)
-                        else:
-                            total_autoconsumo += gen_mensual
-                            total_excedentes += 0
-                    
-                    total_generacion = sum(monthly_generation)
-                    if total_generacion > 0:
-                        pct_autoconsumo = (total_autoconsumo / total_generacion) * 100
-                        pct_excedentes = (total_excedentes / total_generacion) * 100
-                        distribucion_text = f"Autoconsumo: {pct_autoconsumo:.1f}%, Excedentes: {pct_excedentes:.1f}%"
-                    else:
-                        distribucion_text = "No calculable"
-                else:
-                    distribucion_text = "Datos insuficientes"
-                
-                metrics_df = pd.DataFrame({
-                    'Métrica': ['Valor Proyecto', 'TIR', 'VPN', 'Payback', 'LCOE', 'Precio kWh Tarifa', 'Distribución Año 1'],
+                metrics_df = pd.DataFrame([{
+                    'Métrica': ['Valor Proyecto', 'TIR', 'VPN', 'Payback', 'LCOE'],
                     'Valor': [
                         f"${results.get('valor_proyecto', 0):,.0f}",
                         f"{results.get('tir', 0):.2%}",
                         f"${results.get('vpn', 0):,.0f}",
                         f"{results.get('payback', 0):.1f} años",
-                        f"${results.get('lcoe', 0):,.0f}",
-                        f"${precio_kwh:,.0f} COP",
-                        distribucion_text
+                        f"${results.get('lcoe', 0):,.0f}"
                     ]
-                })
+                }])
                 metrics_df.to_excel(writer, sheet_name='Métricas', index=False)
 
             # Cash Flow Sheet
