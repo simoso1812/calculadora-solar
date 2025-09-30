@@ -29,6 +29,13 @@ try:
 except Exception:
     NotionClient = None
 
+# Import project manager module
+try:
+    from project_manager import project_manager
+except ImportError as e:
+    st.error(f"Error importing project manager: {e}")
+    project_manager = None
+
 # Import carbon calculator module
 try:
     from carbon_calculator import CarbonEmissionsCalculator, format_carbon_number, format_currency_cop
@@ -991,7 +998,7 @@ def subir_pdf_a_drive(service, id_carpeta_destino, nombre_archivo, pdf_bytes):
     except Exception as e:
         st.error(f"Error al subir el PDF a Google Drive: {e}")
         return None
-    
+
 def subir_docx_a_drive(service, id_carpeta_destino, nombre_archivo, docx_bytes):
     try:
         file_metadata = {'name': nombre_archivo, 'parents': [id_carpeta_destino]}
@@ -1006,7 +1013,7 @@ def gestionar_creacion_drive(service, parent_folder_id, nombre_proyecto, pdf_byt
         folder_metadata = {'name': nombre_proyecto, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_folder_id]}
         folder = service.files().create(body=folder_metadata, fields='id, webViewLink', supportsAllDrives=True).execute()
         id_carpeta_principal_nueva = folder.get('id')
-        
+
         if id_carpeta_principal_nueva:
             with st.spinner("Creando estructura de subcarpetas..."):
                 crear_subcarpetas(service, id_carpeta_principal_nueva, ESTRUCTURA_CARPETAS)
@@ -1016,25 +1023,26 @@ def gestionar_creacion_drive(service, parent_folder_id, nombre_proyecto, pdf_byt
                 query = f"'{id_carpeta_principal_nueva}' in parents and name='01_Propuesta_y_Contratacion'"
                 results = service.files().list(q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
                 items = results.get('files', [])
-            
+
                 if items:
                     id_carpeta_propuesta = items[0].get('id')
                     subir_pdf_a_drive(service, id_carpeta_propuesta, nombre_pdf, pdf_bytes)
                 else:
                     st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
             with st.spinner("Buscando carpeta de destino para el contrato..."):
-             query_contrato = f"'{id_carpeta_principal_nueva}' in parents and name='04_Permisos_y_Legal'"
-             results_contrato = service.files().list(q=query_contrato, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-             items_contrato = results_contrato.get('files', [])
-             if items_contrato:
-                id_carpeta_contrato = items_contrato[0].get('id')
-                subir_docx_a_drive(service, id_carpeta_contrato, nombre_contrato, contrato_bytes)
-             else:
-                st.warning("No se encontró la subcarpeta '04_Permisos_y_Legal'.")
+              query_contrato = f"'{id_carpeta_principal_nueva}' in parents and name='04_Permisos_y_Legal'"
+              results_contrato = service.files().list(q=query_contrato, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+              items_contrato = results_contrato.get('files', [])
+              if items_contrato:
+                 id_carpeta_contrato = items_contrato[0].get('id')
+                 subir_docx_a_drive(service, id_carpeta_contrato, nombre_contrato, contrato_bytes)
+              else:
+                 st.warning("No se encontró la subcarpeta '04_Permisos_y_Legal'.")
         return folder.get('webViewLink')
     except Exception as e:
         st.error(f"Error en el proceso de Google Drive: {e}")
         return None
+
     
 
 
@@ -2066,16 +2074,12 @@ def render_tab_archivos_mobile():
             datos_contrato = datos_pdf.copy(); datos_contrato['Fecha de la Propuesta'] = cliente.get('fecha', datetime.date.today())
             contrato_bytes = generar_contrato_docx(datos_contrato)
             
-            # Subida a Drive (si hay credenciales)
-            link_carpeta = None
-            try:
-                parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
-                creds = Credentials(None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"), token_uri='https://oauth2.googleapis.com/token', client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"), scopes=['https://www.googleapis.com/auth/drive'])
-                drive_service = build('drive', 'v3', credentials=creds) if parent_folder_id else None
-                if drive_service and parent_folder_id:
-                    link_carpeta = gestionar_creacion_drive(drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final, contrato_bytes, f"Contrato - {nombre_proyecto}.docx")
-            except Exception:
-                st.info("Google Drive no configurado, se omite subida.")
+            if drive_service:
+                link_carpeta = gestionar_creacion_drive(
+                    drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final,contrato_bytes, nombre_contrato_final
+                )
+                if link_carpeta:
+                    st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({link_carpeta})")
             
             # Análisis de Sensibilidad en móvil
             incluir_analisis_sensibilidad = fin.get('incluir_analisis_sensibilidad', False)
@@ -2218,7 +2222,7 @@ def render_desktop_interface():
         creds = Credentials(
             None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
             token_uri='https://oauth2.googleapis.com/token',
-            client_id=os.environ.get("GOOGLE_CLIENT_ID"), 
+            client_id=os.environ.get("GOOGLE_CLIENT_ID"),
             client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
             scopes=['https://www.googleapis.com/auth/drive']
         )
@@ -2925,12 +2929,16 @@ def render_desktop_interface():
             nombre_contrato_final = f"Contrato - {nombre_proyecto}.docx"
             contrato_bytes = generar_contrato_docx(datos_para_contrato)
 
-            if drive_service:
-                link_carpeta = gestionar_creacion_drive(
-                    drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final,contrato_bytes, nombre_contrato_final
-                )
-                if link_carpeta:
-                    st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({link_carpeta})")
+            # Subida a Drive (si hay credenciales)
+            link_carpeta = None
+            try:
+                parent_folder_id = os.environ.get("PARENT_FOLDER_ID")
+                creds = Credentials(None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"), token_uri='https://oauth2.googleapis.com/token', client_id=os.environ.get("GOOGLE_CLIENT_ID"), client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"), scopes=['https://www.googleapis.com/auth/drive'])
+                drive_service = build('drive', 'v3', credentials=creds) if parent_folder_id else None
+                if drive_service and parent_folder_id:
+                    link_carpeta = gestionar_creacion_drive(drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final, contrato_bytes, f"Contrato - {nombre_proyecto}.docx")
+            except Exception:
+                st.info("Google Drive no configurado, se omite subida.")
             
             st.download_button(
                 label="📥 Descargar Reporte en PDF (Copia Local)",
