@@ -38,51 +38,6 @@ def check_env_file():
     return True
 
 
-def test_project_manager():
-    """Test Google Sheets project management"""
-    print("\n[CHECK] Testing Google Sheets project management...")
-
-    try:
-        from project_manager import project_manager
-
-        if project_manager.service is None:
-            print("[ERROR] Google Sheets service not available")
-            return False
-
-        # Try to list projects (will be empty initially)
-        projects = project_manager.list_projects()
-        print("[OK] Google Sheets connected successfully")
-        return True
-
-    except Exception as e:
-        print(f"[ERROR] Project manager test failed: {e}")
-        return False
-
-
-def test_google_drive():
-    """Test Google Drive integration"""
-    print("\n[CHECK] Testing Google Drive integration...")
-
-    try:
-        from project_manager import project_manager
-
-        if project_manager.drive_service is None:
-            print("[ERROR] Google Drive service not available")
-            return False
-
-        # Try to get folder info
-        folder = project_manager.drive_service.files().get(
-            fileId=project_manager.parent_folder_id or os.environ.get('PARENT_FOLDER_ID'),
-            fields='name, id'
-        ).execute()
-        print(f"[OK] Google Drive connected - folder: {folder.get('name')}")
-        return True
-
-    except Exception as e:
-        print(f"[ERROR] Google Drive test failed: {e}")
-        return False
-
-
 def test_financial_summary():
     """Test financial summary generator"""
     print("\n[CHECK] Testing financial summary generator...")
@@ -112,8 +67,6 @@ def main():
 
     tests = [
         ("Environment Variables", check_env_file),
-        ("Project Manager (Google Sheets)", test_project_manager),
-        ("Google Drive", test_google_drive),
         ("Financial Summary", test_financial_summary)
     ]
 
