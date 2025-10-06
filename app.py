@@ -308,11 +308,220 @@ def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float):
 # FUNCIONES DE CÁLCULO
 # ==============================================================================
 
-def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, 
-                                  ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0, 
-                                  profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
-                                  perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
-                                  precio_manual=None, horizonte_base=25):
+def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module,
+                                     ciudad=None, hsp_lista=None, perc_financiamiento=0, tasa_interes_credito=0,
+                                     plazo_credito_años=0, incluir_baterias=False, costo_kwh_bateria=0,
+                                     profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+                                     horizonte_tiempo=25, precio_manual=None, fcl=None, monthly_generation=None):
+    """
+    Genera CSV super detallado del flujo de caja con métricas financieras y técnicas completas
+    """
+    import io
+
+    # Configuración inicial
+    hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
+    n = 0.8
+    life = horizonte_tiempo
+    if clima.strip().upper() == "NUBE": n -= 0.05
+
+    recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
+    potencia_efectiva_calculo = min(size, potencia_ac_inversor)
+
+    # Costos del proyecto
+    costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
+    valor_proyecto_fv = costo_por_kwp * size
+    if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
+
+    costo_bateria = 0
+    if incluir_baterias:
+        consumo_diario = Load / 30
+        capacidad_util_bateria = consumo_diario * dias_autonomia
+        capacidad_nominal_bateria = capacidad_util_bateria / profundidad_descarga
+        costo_bateria = capacidad_nominal_bateria * costo_kwh_bateria
+
+    valor_proyecto_total = valor_proyecto_fv + costo_bateria
+    valor_proyecto_total = math.ceil(valor_proyecto_total)
+
+    # Aplicar precio manual si existe
+    if precio_manual:
+        valor_proyecto_total = precio_manual
+
+    # Financiamiento
+    monto_a_financiar = valor_proyecto_total * (perc_financiamiento / 100)
+    monto_a_financiar = math.ceil(monto_a_financiar)
+
+    cuota_mensual_credito = 0
+    if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_credito > 0:
+        tasa_mensual_credito = tasa_interes_credito / 12
+        num_pagos_credito = plazo_credito_años * 12
+        cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
+        cuota_mensual_credito = math.ceil(cuota_mensual_credito)
+
+    desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
+
+    # Generación mensual base
+    dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    monthly_generation_init = [potencia_efectiva_calculo * hsp * dias * n for hsp, dias in zip(hsp_mensual, dias_por_mes)]
+
+    # Si no se pasaron fcl y monthly_generation, calcularlos
+    if fcl is None or monthly_generation is None:
+        # Calcular flujo de caja básico
+        cashflow_free = []
+        for i in range(life):
+            current_monthly_generation = [gen * ((1 - 0.001) ** i) for gen in monthly_generation_init]
+
+            ahorro_anual_total = 0
+            if incluir_baterias:
+                ahorro_anual_total = (Load * 12) * costkWh
+            else:  # Lógica On-Grid
+                for gen_mes in current_monthly_generation:
+                    consumo_mes = Load
+                    if gen_mes >= consumo_mes:
+                        ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)
+                    else:
+                        ahorro_mes = gen_mes * costkWh
+                    ahorro_anual_total += ahorro_mes
+
+            ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
+            mantenimiento_anual = 0.05 * ahorro_anual_indexado
+            cuotas_anuales_credito = 0
+            if i < plazo_credito_años:
+                cuotas_anuales_credito = cuota_mensual_credito * 12
+            flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+            cashflow_free.append(flujo_anual)
+
+        cashflow_free.insert(0, -desembolso_inicial_cliente)
+        fcl = cashflow_free
+        monthly_generation = monthly_generation_init
+
+    # Calcular flujo de caja detallado
+    data_rows = []
+    flujos_acumulados = []
+
+    # Año 0: Inversión inicial
+    data_rows.append({
+        'Año': 0,
+        'Inversión_Inicial_COP': desembolso_inicial_cliente,
+        'Generación_Anual_kWh': 0,
+        'Consumo_Anual_kWh': 0,
+        'Excedentes_Vendidos_kWh': 0,
+        'Cobertura_Consumo_Porc': 0,
+        'Costo_Energia_Indexado_COP_kWh': 0,
+        'Ahorro_Anual_COP': 0,
+        'Ingresos_Excedentes_COP': 0,
+        'Mantenimiento_COP': 0,
+        'Cuotas_Credito_COP': 0,
+        'Flujo_Neto_Anual_COP': -desembolso_inicial_cliente,
+        'Flujo_Acumulado_COP': -desembolso_inicial_cliente,
+        'VPN_Parcial_COP': -desembolso_inicial_cliente,
+        'TIR_Parcial_Porc': 0,
+        'Degradación_Aplicada_Porc': 0
+    })
+
+    flujos_acumulados = [-desembolso_inicial_cliente]
+
+    # Años 1-N: Flujos anuales con métricas detalladas
+    for i in range(life):
+        # Generación del año con degradación
+        degradacion_anual = 0.001  # 0.1% por año
+        current_monthly_generation = [gen * ((1 - degradacion_anual) ** i) for gen in monthly_generation]
+        generacion_anual_total = sum(current_monthly_generation)
+
+        # Consumo y excedentes
+        consumo_anual = Load * 12
+        excedentes_totales = 0
+        ahorro_anual_total = 0
+        ingresos_excedentes = 0
+
+        if incluir_baterias:
+            # Sistema Off-Grid: todo el consumo se ahorra
+            ahorro_anual_total = consumo_anual * costkWh
+            cobertura_consumo = 100.0
+        else:
+            # Sistema On-Grid: cálculo mensual detallado
+            for gen_mes in current_monthly_generation:
+                consumo_mes = Load
+                if gen_mes >= consumo_mes:
+                    # Consumo cubierto + excedentes vendidos
+                    ahorro_mes = consumo_mes * costkWh
+                    excedentes_mes = gen_mes - consumo_mes
+                    ingresos_excedentes_mes = excedentes_mes * 300.0  # precio excedentes
+                    excedentes_totales += excedentes_mes
+                    ingresos_excedentes += ingresos_excedentes_mes
+                else:
+                    # Consumo parcialmente cubierto
+                    ahorro_mes = gen_mes * costkWh
+                    excedentes_totales += 0
+
+                ahorro_anual_total += ahorro_mes
+
+            # Calcular cobertura de consumo
+            cobertura_consumo = min(100.0, (generacion_anual_total / consumo_anual) * 100) if consumo_anual > 0 else 0
+
+        # Costo de energía indexado
+        costo_energia_indexado = costkWh * ((1 + index) ** i)
+
+        # Aplicar indexación al ahorro
+        ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
+        ingresos_excedentes_indexados = ingresos_excedentes * ((1 + index) ** i)
+
+        # Mantenimiento
+        mantenimiento_anual = 0.05 * ahorro_anual_indexado
+
+        # Cuotas anuales del crédito
+        cuotas_anuales_credito = 0
+        if i < plazo_credito_años:
+            cuotas_anuales_credito = cuota_mensual_credito * 12
+
+        # Flujo neto del año
+        flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+        flujo_acumulado = sum(flujos_acumulados) + flujo_anual
+        flujos_acumulados.append(flujo_anual)
+
+        # TIR y VPN parciales hasta este año
+        tir_parcial = 0
+        vpn_parcial = flujo_acumulado
+
+        if len(flujos_acumulados) > 1:
+            try:
+                tir_parcial = npf.irr(flujos_acumulados) * 100
+                vpn_parcial = npf.npv(dRate, flujos_acumulados)
+            except:
+                tir_parcial = 0
+                vpn_parcial = flujo_acumulado
+
+        data_rows.append({
+            'Año': i + 1,
+            'Inversión_Inicial_COP': 0,
+            'Generación_Anual_kWh': generacion_anual_total,
+            'Consumo_Anual_kWh': consumo_anual,
+            'Excedentes_Vendidos_kWh': excedentes_totales,
+            'Cobertura_Consumo_Porc': cobertura_consumo,
+            'Costo_Energia_Indexado_COP_kWh': costo_energia_indexado,
+            'Ahorro_Anual_COP': ahorro_anual_indexado,
+            'Ingresos_Excedentes_COP': ingresos_excedentes_indexados,
+            'Mantenimiento_COP': mantenimiento_anual,
+            'Cuotas_Credito_COP': cuotas_anuales_credito,
+            'Flujo_Neto_Anual_COP': flujo_anual,
+            'Flujo_Acumulado_COP': flujo_acumulado,
+            'VPN_Parcial_COP': vpn_parcial,
+            'TIR_Parcial_Porc': tir_parcial,
+            'Degradación_Aplicada_Porc': degradacion_anual * 100
+        })
+
+    # Crear DataFrame y CSV
+    df = pd.DataFrame(data_rows)
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False, float_format='%.2f')
+    csv_content = csv_buffer.getvalue()
+
+    return csv_content
+
+def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module,
+                                   ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0,
+                                   profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+                                   perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
+                                   precio_manual=None, horizonte_base=25):
     """
     Calcula análisis de sensibilidad con TIR a 10 y 20 años con y sin financiación
     """
@@ -3378,6 +3587,30 @@ def render_desktop_interface():
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
+
+            # Generar y descargar CSV detallado del flujo de caja
+            try:
+                csv_content = generar_csv_flujo_caja_detallado(
+                    Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
+                    ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                    perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
+                    plazo_credito_años=plazo_credito_años, incluir_baterias=incluir_baterias,
+                    costo_kwh_bateria=costo_kwh_bateria, profundidad_descarga=profundidad_descarga / 100,
+                    eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
+                    horizonte_tiempo=horizonte_tiempo, precio_manual=precio_manual_valor,
+                    fcl=fcl, monthly_generation=monthly_generation
+                )
+                nombre_csv = f"Flujo_Caja_Detallado_{nombre_proyecto}.csv"
+                st.download_button(
+                    label="📊 Descargar Flujo de Caja en CSV (Detallado)",
+                    data=csv_content,
+                    file_name=nombre_csv,
+                    mime="text/csv",
+                    use_container_width=True,
+                    help="Descarga un archivo CSV con el flujo de caja anual detallado, incluyendo generación, consumo, costos, TIR/VPN parciales y más métricas"
+                )
+            except Exception as csv_error:
+                st.warning(f"No se pudo generar el CSV: {csv_error}")
             st.success('¡Proceso completado!')
 
             # Notion CRM - agregar a "En conversaciones" (flujo desktop)
