@@ -30,29 +30,17 @@ class ProjectManager:
             refresh_token = os.environ.get("GOOGLE_REFRESH_TOKEN")
             client_id = os.environ.get("GOOGLE_CLIENT_ID")
             client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> parent of 7c68b85 (project management deletion)
             print(f"[DEBUG] Initializing Google Sheets service...")
             print(f"[DEBUG] Client ID present: {bool(client_id)}")
             print(f"[DEBUG] Client Secret present: {bool(client_secret)}")
             print(f"[DEBUG] Refresh Token present: {bool(refresh_token)}")
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> parent of 7c68b85 (project management deletion)
             if not all([refresh_token, client_id, client_secret]):
                 print("[ERROR] Missing Google credentials in environment variables")
                 self.service = None
                 return
-<<<<<<< HEAD
 
-=======
-                
->>>>>>> parent of 7c68b85 (project management deletion)
             creds = Credentials(
                 None,
                 refresh_token=refresh_token,
@@ -63,28 +51,17 @@ class ProjectManager:
                        'https://www.googleapis.com/auth/drive',
                        'https://www.googleapis.com/auth/drive.file']
             )
-<<<<<<< HEAD
 
             print("[DEBUG] Building Google Sheets service...")
             self.service = build('sheets', 'v4', credentials=creds)
 
-=======
-            
-            print("[DEBUG] Building Google Sheets service...")
-            self.service = build('sheets', 'v4', credentials=creds)
-            
->>>>>>> parent of 7c68b85 (project management deletion)
             print("[DEBUG] Building Google Drive service...")
             self.drive_service = build('drive', 'v3', credentials=creds)
 
             # Get or create spreadsheet
             self.spreadsheet_id = os.environ.get("PROJECTS_SPREADSHEET_ID")
             print(f"[DEBUG] Existing spreadsheet ID: {self.spreadsheet_id}")
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> parent of 7c68b85 (project management deletion)
             if not self.spreadsheet_id:
                 print("[DEBUG] No spreadsheet ID found, creating new one...")
                 self._create_projects_spreadsheet()
@@ -103,11 +80,7 @@ class ProjectManager:
 
             # Check parent folder access
             self._check_parent_folder_access()
-<<<<<<< HEAD
 
-=======
-            
->>>>>>> parent of 7c68b85 (project management deletion)
             print("[DEBUG] Google Sheets service initialized successfully")
 
         except Exception as e:
@@ -138,11 +111,7 @@ class ProjectManager:
                     print(f"Cannot access parent folder {parent_folder_id}: {e}")
                     self.parent_folder_accessible = False
                     return
-<<<<<<< HEAD
 
-=======
-        
->>>>>>> parent of 7c68b85 (project management deletion)
         if not parent_folder_id:
             print("No PARENT_FOLDER_ID specified or accessible, creating a new one...")
             try:
@@ -155,11 +124,7 @@ class ProjectManager:
                     fields='id'
                 ).execute()
                 new_folder_id = folder.get('id')
-<<<<<<< HEAD
 
-=======
-                
->>>>>>> parent of 7c68b85 (project management deletion)
                 if new_folder_id:
                     print(f"Created new parent folder: {new_folder_id}")
                     # Update .env file
@@ -477,11 +442,7 @@ class ProjectManager:
             List of project dictionaries
         """
         if not self.service:
-<<<<<<< HEAD
             print("[ERROR] Attempting to list projects but Google Sheets service not available")
-=======
-            print("[ERROR] Attempting to list projects but Google Sheets service is not available")
->>>>>>> parent of 7c68b85 (project management deletion)
             print("[DEBUG] This means the project management system could not initialize")
             print("[DEBUG] However, you can still:")
             print("  - Use the calculator for new projects")
