@@ -3514,7 +3514,7 @@ def render_desktop_interface():
                 "Valor Total del Proyecto (COP)": f"${valor_pdf_redondeado:,.0f}",
                 "Valor Sistema FV (sin IVA)": f"${valor_sistema_sin_iva_pdf:,.0f}",
                 "Valor IVA": f"${valor_iva_pdf:,.0f}",
-                "Tamano del Sistema (kWp)": f"{size}",
+                "Tamano del Sistema (kWp)": f"{size:.1f}",
                 "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W","Área Requerida Aprox. (m²)": f"{area_requerida}",
                 "Inversor Recomendado": f"{recomendacion_inversor}",
                 "Generacion Promedio Mensual (kWh)": f"{generacion_promedio_mensual:,.1f}",
