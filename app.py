@@ -65,7 +65,7 @@ HSP_MENSUAL_POR_CIUDAD = {
 PROMEDIOS_COSTO = {
     'Equipos': 24.33,
     'Materiales': 16.67,
-    'IVA (Impuestos)': 11.50,
+    'IVA (Impuestos)': 6.28,
     'Margen (Ganancia)': 16.38
 }
 
@@ -3402,13 +3402,13 @@ def render_desktop_interface():
                 valor_base_presupuesto = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
                 presupuesto_equipos = valor_base_presupuesto * (PROMEDIOS_COSTO['Equipos'] / 100)
                 presupuesto_materiales = valor_base_presupuesto * (PROMEDIOS_COSTO['Materiales'] / 100)
-                provision_iva_guia = valor_base_presupuesto * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
                 ganancia_estimada_guia = valor_base_presupuesto * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
+                provision_iva_guia = (presupuesto_materiales + ganancia_estimada_guia) * 0.19
                 st.info(f"""Basado en el **Valor Total del Proyecto de ${valor_base_presupuesto:,.0f} COP**, el presupuesto guía según tu historial es:""")
                 col_guia1, col_guia2, col_guia3, col_guia4 = st.columns(4)
                 col_guia1.metric(f"Equipos ({PROMEDIOS_COSTO['Equipos']:.2f}%)", f"${math.ceil(presupuesto_equipos):,.0f}")
                 col_guia2.metric(f"Materiales ({PROMEDIOS_COSTO['Materiales']:.2f}%)", f"${math.ceil(presupuesto_materiales):,.0f}")
-                col_guia3.metric(f"Provisión IVA ({PROMEDIOS_COSTO['IVA (Impuestos)']:.2f}%)", f"${math.ceil(provision_iva_guia):,.0f}")
+                col_guia3.metric(f"Provisión IVA (19% de Materiales+Ganancia)", f"${math.ceil(provision_iva_guia):,.0f}")
                 col_guia4.metric(f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)", f"${math.ceil(ganancia_estimada_guia):,.0f}")
                 st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
 
@@ -3504,7 +3504,9 @@ def render_desktop_interface():
             # Usar precio manual si está activado para el PDF principal también
             valor_pdf = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
             valor_pdf_redondeado = math.ceil(valor_pdf / 100) * 100
-            valor_iva_pdf = math.ceil((valor_pdf_redondeado * (PROMEDIOS_COSTO['IVA (Impuestos)']/100))/100)*100
+            presupuesto_materiales_pdf = valor_pdf_redondeado * (PROMEDIOS_COSTO['Materiales'] / 100)
+            ganancia_estimada_pdf = valor_pdf_redondeado * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
+            valor_iva_pdf = math.ceil(((presupuesto_materiales_pdf + ganancia_estimada_pdf) * 0.19)/100)*100
             valor_sistema_sin_iva_pdf = valor_pdf_redondeado - valor_iva_pdf
 
             datos_para_pdf = {
