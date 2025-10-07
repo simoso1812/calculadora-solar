@@ -311,10 +311,12 @@ def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float):
 # ==============================================================================
 
 def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module,
-                                     ciudad=None, hsp_lista=None, perc_financiamiento=0, tasa_interes_credito=0,
-                                     plazo_credito_años=0, incluir_baterias=False, costo_kwh_bateria=0,
-                                     profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
-                                     horizonte_tiempo=25, precio_manual=None, fcl=None, monthly_generation=None):
+                                      ciudad=None, hsp_lista=None, perc_financiamiento=0, tasa_interes_credito=0,
+                                      plazo_credito_años=0, incluir_baterias=False, costo_kwh_bateria=0,
+                                      profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+                                      horizonte_tiempo=25, precio_manual=None, fcl=None, monthly_generation=None,
+                                      incluir_beneficios_tributarios=False, incluir_deduccion_renta=False,
+                                      incluir_depreciacion_acelerada=False):
     """
     Genera CSV super detallado del flujo de caja con métricas financieras y técnicas completas
     """
@@ -475,8 +477,25 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
         if i < plazo_credito_años:
             cuotas_anuales_credito = cuota_mensual_credito * 12
 
+        # Beneficios tributarios
+        beneficio_tributario_total = 0
+        beneficio_deduccion_renta = 0
+        beneficio_depreciacion_acelerada = 0
+
+        if incluir_beneficios_tributarios:
+            if incluir_deduccion_renta and i == 1:  # Año 2
+                # 17.5% del CAPEX indexado al año 2
+                capex_indexado_año2 = valor_proyecto_total * ((1 + index) ** i)
+                beneficio_deduccion_renta = capex_indexado_año2 * 0.175
+                beneficio_tributario_total += beneficio_deduccion_renta
+
+            if incluir_depreciacion_acelerada and i < 3:  # Años 1-3
+                # 33% del CAPEX cada año por 3 años
+                beneficio_depreciacion_acelerada = valor_proyecto_total * 0.33
+                beneficio_tributario_total += beneficio_depreciacion_acelerada
+
         # Flujo neto del año
-        flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+        flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito + beneficio_tributario_total
         flujo_acumulado = sum(flujos_acumulados) + flujo_anual
         flujos_acumulados.append(flujo_anual)
 
@@ -504,6 +523,9 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
             'Ingresos_Excedentes_COP': ingresos_excedentes_indexados,
             'Mantenimiento_COP': mantenimiento_anual,
             'Cuotas_Credito_COP': cuotas_anuales_credito,
+            'Beneficio_Deduccion_Renta_COP': beneficio_deduccion_renta,
+            'Beneficio_Depreciacion_Acelerada_COP': beneficio_depreciacion_acelerada,
+            'Beneficio_Tributario_Total_COP': beneficio_tributario_total,
             'Flujo_Neto_Anual_COP': flujo_anual,
             'Flujo_Acumulado_COP': flujo_acumulado,
             'VPN_Parcial_COP': vpn_parcial,
@@ -520,10 +542,11 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
     return csv_content
 
 def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module,
-                                   ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0,
-                                   profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
-                                   perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
-                                   precio_manual=None, horizonte_base=25):
+                                    ciudad=None, hsp_lista=None, incluir_baterias=False, costo_kwh_bateria=0,
+                                    profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
+                                    perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
+                                    precio_manual=None, horizonte_base=25, incluir_beneficios_tributarios=False,
+                                    incluir_deduccion_renta=False, incluir_depreciacion_acelerada=False):
     """
     Calcula análisis de sensibilidad con TIR a 10 y 20 años con y sin financiación
     """
@@ -558,7 +581,10 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                           profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria,
                           dias_autonomia=dias_autonomia, horizonte_tiempo=horizonte_base,
-                          incluir_carbon=False)  # Disable carbon for sensitivity analysis
+                          incluir_carbon=False, incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                          incluir_deduccion_renta=incluir_deduccion_renta,
+                          incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
+                          demora_6_meses=False)  # Disable carbon and tax benefits for sensitivity analysis
             
             # SIEMPRE recalcular el flujo de caja para asegurar consistencia
             if precio_manual is not None:
@@ -722,7 +748,9 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
                 tasa_degradacion=0, precio_excedentes=0,
                 incluir_baterias=False, costo_kwh_bateria=0,
                 profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
-                horizonte_tiempo=25, incluir_carbon=False):
+                horizonte_tiempo=25, incluir_carbon=False,
+                incluir_beneficios_tributarios=False, incluir_deduccion_renta=False,
+                incluir_depreciacion_acelerada=False, demora_6_meses=False):
     
     # Se asegura de tener la lista de HSP mensuales para el cálculo
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
@@ -775,7 +803,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     for i in range(life):
         current_monthly_generation = [gen * ((1 - tasa_degradacion) ** i) for gen in monthly_generation_init]
         total_lifetime_generation += sum(current_monthly_generation)
-        
+
         ahorro_anual_total = 0
         if incluir_baterias:
             ahorro_anual_total = (Load * 12) * costkWh
@@ -787,15 +815,37 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
                 else:
                     ahorro_mes = gen_mes * costkWh
                 ahorro_anual_total += ahorro_mes
-        
+
         ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-        if i == 0: 
+        if i == 0:
             ahorro_anual_año1 = ahorro_anual_total
+
+        # Aplicar demora de 6 meses si está habilitada
+        if demora_6_meses and i == 0:  # Solo afecta el año 1
+            ahorro_anual_indexado *= 0.5  # 50% para 6 meses de operación
+
         mantenimiento_anual = 0.05 * ahorro_anual_indexado
         cuotas_anuales_credito = 0
-        if i < plazo_credito_años: 
+        if i < plazo_credito_años:
             cuotas_anuales_credito = cuota_mensual_credito * 12
         flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+
+        # Aplicar beneficios tributarios (pueden aplicarse ambos simultáneamente)
+        beneficio_tributario_total = 0
+        if incluir_beneficios_tributarios:
+            if incluir_deduccion_renta and i == 1:  # Año 2
+                # 17.5% del CAPEX indexado al año 2
+                capex_indexado_año2 = valor_proyecto_total * ((1 + index) ** i)
+                beneficio_deduccion = capex_indexado_año2 * 0.175
+                beneficio_tributario_total += beneficio_deduccion
+
+            if incluir_depreciacion_acelerada and i < 3:  # Años 1-3
+                # 33% del CAPEX cada año por 3 años
+                beneficio_depreciacion = valor_proyecto_total * 0.33
+                beneficio_tributario_total += beneficio_depreciacion
+
+        flujo_anual += beneficio_tributario_total
+
         cashflow_free.append(flujo_anual)
 
     cashflow_free.insert(0, -desembolso_inicial_cliente)
@@ -1946,6 +1996,31 @@ def render_tab_finanzas_mobile():
         dias_autonomia = 2
         costo_bateria = 0
     
+    st.subheader("📊 Consideraciones Adicionales del Flujo de Caja")
+
+    # Beneficios tributarios
+    incluir_beneficios_tributarios_mobile = st.toggle(
+        "💰 Incluir beneficios tributarios",
+        help="Agrega beneficios fiscales al flujo de caja",
+        key="beneficios_tributarios_mobile"
+    )
+
+    tipo_beneficio_tributario_mobile = "deduccion_renta"
+    if incluir_beneficios_tributarios_mobile:
+        tipo_beneficio_tributario_mobile = st.radio(
+            "Tipo de beneficio:",
+            ["deduccion_renta", "depreciacion_acelerada"],
+            format_func=lambda x: "Deducción Renta" if x == "deduccion_renta" else "Depreciación Acelerada",
+            key="tipo_beneficio_mobile"
+        )
+
+    # Demora de 6 meses
+    demora_6_meses_mobile = st.toggle(
+        "⏰ 6 meses de demora",
+        help="Reduce beneficios año 1 a la mitad",
+        key="demora_6_meses_mobile"
+    )
+
     st.subheader("🌱 Cálculo de Emisiones de Carbono")
     incluir_carbon = st.toggle(
         "🌱 Incluir análisis de sostenibilidad",
@@ -1977,7 +2052,10 @@ def render_tab_finanzas_mobile():
             'dias_autonomia': dias_autonomia,
             'costo_bateria': costo_bateria,
             'incluir_carbon': incluir_carbon,
-            'mostrar_resumen_financiero_mobile': mostrar_resumen_financiero_mobile
+            'mostrar_resumen_financiero_mobile': mostrar_resumen_financiero_mobile,
+            'incluir_beneficios_tributarios': incluir_beneficios_tributarios_mobile,
+            'tipo_beneficio_tributario': tipo_beneficio_tributario_mobile,
+            'demora_6_meses': demora_6_meses_mobile
         }
         st.success("✅ Parámetros financieros guardados")
 
@@ -2132,6 +2210,9 @@ def render_tab_archivos_mobile():
 
             # Sostenibilidad: usar la preferencia de Finanzas (móvil)
             incluir_carbon = bool(fin.get('incluir_carbon', False))
+            incluir_beneficios_tributarios = bool(fin.get('incluir_beneficios_tributarios', False))
+            tipo_beneficio_tributario = fin.get('tipo_beneficio_tributario', 'deduccion_renta')
+            demora_6_meses = bool(fin.get('demora_6_meses', False))
 
             val_total, size_calc, monto_fin, cuota_mensual, desembolso_ini, fcl, trees, monthly_gen, vpn, tir, cant_calc, life, rec_inv, lcoe, n_final, hsp_final, pot_ac, ahorro_a1, area_req, cap_bat, carbon_data = \
                 cotizacion(consumo, size, cantidad, cubierta, clima, index_input, dRate_input, costkWh, int(pot_panel),
@@ -2140,7 +2221,10 @@ def render_tab_archivos_mobile():
                     tasa_degradacion=0.001, precio_excedentes=300.0,
                     incluir_baterias=incluir_bat, costo_kwh_bateria=costo_kwh_bat,
                     profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=dias_auto,
-                    horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon)
+                    horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon,
+                    incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                    tipo_beneficio_tributario=tipo_beneficio_tributario,
+                    demora_6_meses=demora_6_meses)
             
             # Aplicar precio manual si está activado
             precio_manual = fin.get('precio_manual', False)
@@ -2717,7 +2801,7 @@ def render_desktop_interface():
         st.subheader("Parámetros Financieros")
         
         # Opción de precio manual para emergencias y descuentos
-        precio_manual = st.toggle("💰 Precio Manual (Emergencias/Descuentos)", help="Activa esta opción para ingresar un precio personalizado del proyecto")
+        precio_manual = st.toggle("💰 Precio Manual (Emergencias/Descuentos)", help="Activa esta opción para ingresar un precio personalizado del proyecto", key="precio_manual_desktop")
         
         if precio_manual:
             precio_manual_valor = st.number_input("Precio Manual del Proyecto (COP)", min_value=1000000, value=50000000, step=100000, help="Ingresa el precio total del proyecto en COP")
@@ -2736,8 +2820,9 @@ def render_desktop_interface():
         # Análisis de sensibilidad
         st.subheader("📊 Análisis de Sensibilidad")
         incluir_analisis_sensibilidad = st.toggle(
-            "🔍 Incluir Análisis de Sensibilidad", 
-            help="Genera un análisis comparativo de TIR a 10 y 20 años con y sin financiación"
+            "🔍 Incluir Análisis de Sensibilidad",
+            help="Genera un análisis comparativo de TIR a 10 y 20 años con y sin financiación",
+            key="analisis_sensibilidad_desktop"
         )
         
         # Debug: Mostrar el valor del toggle
@@ -2751,7 +2836,7 @@ def render_desktop_interface():
         dRate_input = st.slider("Tasa de descuento (%)", 0.0, 25.0, 10.0, 0.5)
         
         st.subheader("Financiamiento")
-        usa_financiamiento = st.toggle("Incluir financiamiento")
+        usa_financiamiento = st.toggle("Incluir financiamiento", key="financiamiento_desktop")
         perc_financiamiento, tasa_interes_input, plazo_credito_años = 0, 0, 0
         if usa_financiamiento:
             perc_financiamiento = st.slider("Porcentaje a financiar (%)", 0, 100, 70)
@@ -2759,7 +2844,7 @@ def render_desktop_interface():
             plazo_credito_años = st.number_input("Plazo del crédito (años)", 1, 20, 5)
         
         st.subheader("Almacenamiento (Baterías) - Modo Off-Grid")
-        incluir_baterias = st.toggle("Añadir baterías (asumir sistema aislado)")
+        incluir_baterias = st.toggle("Añadir baterías (asumir sistema aislado)", key="baterias_desktop")
         dias_autonomia = 2
         if incluir_baterias:
             dias_autonomia = st.number_input("Días de autonomía deseados", 1, 7, 2, help="Días que el sistema debe soportar el consumo sin sol.")
@@ -2770,10 +2855,43 @@ def render_desktop_interface():
             costo_kwh_bateria, profundidad_descarga, eficiencia_bateria = 0, 0, 0
 
         st.markdown("---")
+        st.subheader("📊 Consideraciones Adicionales del Flujo de Caja")
+
+        # Beneficios tributarios - permitir selección múltiple
+        incluir_beneficios_tributarios = st.toggle(
+            "💰 Incluir beneficios tributarios",
+            help="Agrega beneficios fiscales al flujo de caja (puedes seleccionar ambos)",
+            key="beneficios_tributarios_desktop"
+        )
+
+        incluir_deduccion_renta = False
+        incluir_depreciacion_acelerada = False
+        if incluir_beneficios_tributarios:
+            st.info("💡 **Puedes seleccionar ambos beneficios tributarios simultáneamente**")
+            incluir_deduccion_renta = st.checkbox(
+                "Deducción de Renta (17.5% del CAPEX en año 2)",
+                help="Aplica deducción de renta del 17.5% del valor del proyecto en el año 2",
+                key="deduccion_renta_desktop"
+            )
+            incluir_depreciacion_acelerada = st.checkbox(
+                "Depreciación Acelerada (33% del CAPEX años 1-3)",
+                help="Aplica depreciación acelerada del 33% del valor del proyecto en los años 1, 2 y 3",
+                key="depreciacion_acelerada_desktop"
+            )
+
+        # Demora de 6 meses
+        demora_6_meses = st.toggle(
+            "⏰ Proyecto con 6 meses de demora en conexión",
+            help="Reduce los beneficios del año 1 a la mitad (6 meses de operación)",
+            key="demora_6_meses_desktop"
+        )
+
+        st.markdown("---")
         st.subheader("🌱 Cálculo de Emisiones de Carbono")
         incluir_carbon = st.toggle(
             "🌱 Incluir análisis de sostenibilidad",
-            help="Calcula las emisiones de CO2 evitadas y equivalencias ambientales"
+            help="Calcula las emisiones de CO2 evitadas y equivalencias ambientales",
+            key="carbon_desktop"
         )
         if incluir_carbon:
             st.info("📊 **Análisis de Sostenibilidad Activado**: Se calcularán las emisiones de carbono evitadas, equivalencias ambientales y valor de certificación.")
@@ -2782,7 +2900,8 @@ def render_desktop_interface():
         st.subheader("💼 Resumen Financiero para Financieros")
         mostrar_resumen_financiero = st.toggle(
             "💼 Mostrar resumen financiero",
-            help="Muestra métricas clave para análisis financiero: precio del proyecto, O&M anual, generación anual y degradación"
+            help="Muestra métricas clave para análisis financiero: precio del proyecto, O&M anual, generación anual y degradación",
+            key="resumen_financiero_desktop"
         )
 
         if mostrar_resumen_financiero:
@@ -3161,13 +3280,17 @@ def render_desktop_interface():
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
             potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria, carbon_data = \
                 cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
-                            ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
-                            perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
-                            plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
-                            incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
-                            profundidad_descarga=profundidad_descarga / 100,
-                            eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
-                            horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon)
+                             ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                             perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
+                             plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
+                             incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
+                             profundidad_descarga=profundidad_descarga / 100,
+                             eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
+                             horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon,
+                             incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                             incluir_deduccion_renta=incluir_deduccion_renta,
+                             incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
+                             demora_6_meses=demora_6_meses)
             
             # Aplicar precio manual si está activado
             if precio_manual and precio_manual_valor:
@@ -3345,13 +3468,16 @@ def render_desktop_interface():
                 with st.spinner("Calculando análisis de sensibilidad..."):
                     # Calcular análisis de sensibilidad
                     analisis_sensibilidad = calcular_analisis_sensibilidad(
-                        Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, 
+                        Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100,
                         costkWh, module, ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
                         incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
-                        profundidad_descarga=profundidad_descarga / 100, eficiencia_bateria=eficiencia_bateria / 100, 
-                        dias_autonomia=dias_autonomia, perc_financiamiento=perc_financiamiento, 
+                        profundidad_descarga=profundidad_descarga / 100, eficiencia_bateria=eficiencia_bateria / 100,
+                        dias_autonomia=dias_autonomia, perc_financiamiento=perc_financiamiento,
                         tasa_interes_credito=tasa_interes_input / 100, plazo_credito_años=plazo_credito_años,
-                        precio_manual=precio_manual_valor, horizonte_base=horizonte_tiempo
+                        precio_manual=precio_manual_valor, horizonte_base=horizonte_tiempo,
+                        incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                        incluir_deduccion_renta=incluir_deduccion_renta,
+                        incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
                     )
                 
                 # Crear tabla comparativa
@@ -3602,7 +3728,10 @@ def render_desktop_interface():
                     costo_kwh_bateria=costo_kwh_bateria, profundidad_descarga=profundidad_descarga / 100,
                     eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
                     horizonte_tiempo=horizonte_tiempo, precio_manual=precio_manual_valor,
-                    fcl=fcl, monthly_generation=monthly_generation
+                    fcl=fcl, monthly_generation=monthly_generation,
+                    incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                    incluir_deduccion_renta=incluir_deduccion_renta,
+                    incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
                 )
                 nombre_csv = f"Flujo_Caja_Detallado_{nombre_proyecto}.csv"
                 st.download_button(

@@ -110,6 +110,8 @@ La aplicación crea automáticamente una estructura organizada en Google Drive:
 - Tasa de descuento
 - Financiamiento opcional
 - Configuración de baterías
+- **Beneficios Tributarios**: Deducción de renta o depreciación acelerada
+- **Demora en Conexión**: Consideración de 6 meses para inicio de beneficios
 - 🌱 Análisis de sostenibilidad (opcional)
 
 ### 4. Resultados y Reportes
@@ -137,6 +139,11 @@ Generación = Potencia Efectiva × HSP Mensual × Días × Eficiencia
 - **VPN**: Valor Presente Neto
 - **Payback**: Período de retorno de la inversión
 - **LCOE**: Costo Nivelado de Energía
+
+### Beneficios Tributarios y Consideraciones Especiales
+- **Deducción de Renta**: 17.5% del CAPEX indexado aplicado en el año 2
+- **Depreciación Acelerada**: 33% del CAPEX aplicado en los primeros 3 años
+- **Demora en Conexión**: Reducción del 50% en beneficios del año 1 (6 meses de operación)
 
 ### 🌱 Cálculos de Sostenibilidad
 - **Emisiones de CO2 Evitadas**: Basado en factores de emisión de la red colombiana
@@ -220,6 +227,7 @@ La aplicación incluye un módulo avanzado de cálculo de emisiones de carbono q
 - [ ] Notificaciones automáticas
 - [ ] Backup automático en la nube
 - [x] **🌱 Análisis de Sostenibilidad (Implementado)**
+- [x] **💰 Beneficios Tributarios y Demora en Conexión (Implementado)**
 
 ## 🤝 Contribución
 
