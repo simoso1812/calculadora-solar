@@ -37,14 +37,9 @@ except ImportError:
     st.warning("⚠️ Módulo de cálculo de carbono no encontrado. Las funcionalidades de sostenibilidad estarán limitadas.")
     carbon_calculator = None
 
-# Import project management and financial summary modules
-try:
-    from project_manager import project_manager
-    from financial_summary import financial_summary_generator
-except ImportError as e:
-    st.error(f"Error importing project management modules: {e}")
-    project_manager = None
-    financial_summary_generator = None
+# Project management features removed - not needed
+project_manager = None
+financial_summary_generator = None
 
 # ==============================================================================
 # CONSTANTES Y DATOS GLOBALES
@@ -666,18 +661,41 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                 # Insertar desembolso inicial al inicio
                 fcl.insert(0, -desembolso_inicial_cliente)
             
-            # Recalcular métricas financieras
-            valor_presente = npf.npv(dRate, fcl)
-            tasa_interna = npf.irr(fcl)
+            # Recalcular métricas financieras con manejo de errores
+            try:
+                valor_presente = npf.npv(dRate, fcl)
+                if valor_presente is None or np.isnan(valor_presente):
+                    valor_presente = 0
+            except (ValueError, TypeError):
+                valor_presente = 0
+                
+            try:
+                tasa_interna = npf.irr(fcl)
+                if tasa_interna is None or np.isnan(tasa_interna):
+                    tasa_interna = 0
+            except (ValueError, TypeError):
+                tasa_interna = 0
             
-            # Calcular payback
-            payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
+            # Calcular payback con manejo de errores
+            payback_simple = None
             payback_exacto = None
-            if payback_simple is not None:
-                if payback_simple > 0 and (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1]) != 0:
-                    payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
-                else:
-                    payback_exacto = float(payback_simple)
+            
+            try:
+                cumsum_fcl = np.cumsum(fcl)
+                payback_simple = next((i for i, x in enumerate(cumsum_fcl) if x >= 0), None)
+                
+                if payback_simple is not None:
+                    if payback_simple > 0 and len(cumsum_fcl) > payback_simple:
+                        denominator = cumsum_fcl[payback_simple] - cumsum_fcl[payback_simple-1]
+                        if abs(denominator) > 1e-10:  # Evitar división por cero
+                            payback_exacto = (payback_simple - 1) + abs(cumsum_fcl[payback_simple-1]) / denominator
+                        else:
+                            payback_exacto = float(payback_simple)
+                    else:
+                        payback_exacto = float(payback_simple)
+            except (IndexError, ValueError, ZeroDivisionError) as e:
+                print(f"Error calculating payback: {e}")
+                payback_exacto = None
             
             # DEBUG: Mostrar información detallada
             print(f"\n=== DEBUG ESCENARIO: {escenario['nombre']} ===")
@@ -775,8 +793,11 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     if incluir_baterias:
         consumo_diario = Load / 30
         capacidad_util_bateria = consumo_diario * dias_autonomia
-        if profundidad_descarga > 0:
+        if profundidad_descarga > 0 and profundidad_descarga <= 1.0:
             capacidad_nominal_bateria = capacidad_util_bateria / profundidad_descarga
+        else:
+            # Valor por defecto si profundidad_descarga es inválida
+            capacidad_nominal_bateria = capacidad_util_bateria / 0.8  # 80% por defecto
         costo_bateria = capacidad_nominal_bateria * costo_kwh_bateria
     
     valor_proyecto_total = valor_proyecto_fv + costo_bateria
@@ -789,8 +810,11 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_credito > 0:
         tasa_mensual_credito = tasa_interes_credito / 12
         num_pagos_credito = plazo_credito_años * 12
-        cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
-        cuota_mensual_credito = math.ceil(cuota_mensual_credito)
+        try:
+            cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
+            cuota_mensual_credito = math.ceil(cuota_mensual_credito)
+        except (ValueError, ZeroDivisionError):
+            cuota_mensual_credito = 0
         
     desembolso_inicial_cliente = valor_proyecto_total - monto_a_financiar
     
@@ -1107,6 +1131,11 @@ class PropuestaPDF(FPDF):
         self.set_font('Roboto', 'B', 14) # Estilo negrita
         self.set_xy(x_fin - ancho_celda, 106) # Coordenada Y estimada
         self.cell(w=ancho_celda, txt=datos.get("Valor Total del Proyecto (COP)", "$ 0"), align='R')
+        
+        # --- O&M (Operation & Maintenance) ---
+        self.set_font('Roboto', 'B', 14) # Estilo normal
+        self.set_xy(x_fin - ancho_celda, 115) # Coordenada Y estimada (10mm debajo del total)
+        self.cell(w=ancho_celda, txt=datos.get("O&M (Operation & Maintenance)", "$ 0"), align='R')
     def crear_pagina_aspectos_1(self):
         self.add_page()
         self.image('assets/10.jpg', x=0, y=0, w=210)
@@ -1254,6 +1283,20 @@ def subir_pdf_a_drive(service, id_carpeta_destino, nombre_archivo, pdf_bytes):
     except Exception as e:
         st.error(f"Error al subir el PDF a Google Drive: {e}")
         return None
+
+def subir_csv_a_drive(service, id_carpeta_destino, nombre_archivo, csv_content):
+    """Sube un archivo CSV a Google Drive"""
+    try:
+        file_metadata = {'name': nombre_archivo, 'parents': [id_carpeta_destino]}
+        media = MediaIoBaseUpload(io.BytesIO(csv_content.encode('utf-8')), mimetype='text/csv')
+        file = service.files().create(
+            body=file_metadata, media_body=media, fields='id, webViewLink', supportsAllDrives=True
+        ).execute()
+        st.info(f"📊 CSV guardado en la carpeta 'Administrativo y Financiero'.")
+        return file.get('webViewLink')
+    except Exception as e:
+        st.error(f"Error al subir el CSV a Google Drive: {e}")
+        return None
     
 def subir_docx_a_drive(service, id_carpeta_destino, nombre_archivo, docx_bytes):
     try:
@@ -1371,7 +1414,16 @@ def get_pvgis_hsp(lat, lon):
         
         response = requests.get(api_url, params=params, timeout=30)
         response.raise_for_status()
+        
+        # Verificar que la respuesta no esté vacía
+        if not response.content:
+            raise ValueError("Respuesta vacía del servidor PVGIS")
+            
         data = response.json()
+        
+        # Verificar estructura de datos
+        if not isinstance(data, dict):
+            raise ValueError("Formato de respuesta inválido de PVGIS")
 
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
@@ -1807,8 +1859,8 @@ def render_mobile_interface():
         """)
     
     # Tabs principales con Ubicación
-    tab1, tabUbic, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "👤 Cliente", "📍 Ubicación", "⚡ Sistema", "💰 Finanzas", "📊 Resultados", "📁 Archivos", "🔌 Cargadores", "💼 Financiero"
+    tab1, tabUbic, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "👤 Cliente", "📍 Ubicación", "⚡ Sistema", "💰 Finanzas", "📊 Resultados", "📁 Archivos", "🔌 Cargadores"
     ])
     
     with tab1:
@@ -1825,8 +1877,6 @@ def render_mobile_interface():
         render_tab_archivos_mobile()
     with tab6:
         render_tab_cargadores_mobile()
-    with tab7:
-        render_tab_financiero_mobile()
 
 def render_tab_cliente_mobile():
     """Tab de cliente para interfaz móvil"""
@@ -1926,14 +1976,18 @@ def render_tab_sistema_mobile():
     st.info(f"📊 Sistema calculado: {cantidad} paneles de {potencia_panel}W = {size} kWp")
     
     if st.button("💾 Guardar Configuración del Sistema", use_container_width=True):
-        st.session_state.sistema_data = {
+        # Inicializar sistema_data si no existe
+        if 'sistema_data' not in st.session_state:
+            st.session_state.sistema_data = {}
+            
+        st.session_state.sistema_data.update({
             'consumo': consumo,
             'potencia_panel': potencia_panel,
             'cubierta': cubierta,
             'clima': clima,
             'quantity': cantidad,
             'size': size
-        }
+        })
         st.success("✅ Configuración del sistema guardada")
 
 def render_tab_finanzas_mobile():
@@ -2115,10 +2169,8 @@ def render_tab_resultados_mobile():
         potencia_efectiva = min(size_calc, size_calc / 1.2)  # Aproximación
         generacion_anual_inicial = potencia_efectiva * hsp_promedio * 365 * 0.8  # 80% eficiencia
 
-        # O&M anual (5% del ahorro anual)
-        costkWh = float(fin.get('costo_kwh', 850))
-        ahorro_anual_aprox = (consumo * 12) * costkWh
-        om_anual = 0.10 * ahorro_anual_aprox
+        # O&M anual (2% del CAPEX)
+        om_anual = valor_proyecto_total * 0.02  # 2% del valor total del proyecto
 
         # Degradación anual
         tasa_degradacion_anual = 0.1  # 0.1% por año
@@ -2486,155 +2538,6 @@ def render_tab_cargadores_mobile():
         except Exception as ex:
             st.error(f"❌ Error generando la cotización de cargadores: {ex}")
 
-def render_tab_financiero_mobile():
-    """Pestaña móvil para gestión financiera y proyectos."""
-    st.header("💼 Gestión Financiera y Proyectos")
-
-    if not project_manager or not financial_summary_generator:
-        st.warning("⚠️ Módulos de gestión financiera no disponibles")
-        return
-
-    # Sub-tabs for financial management
-    fin_tab1, fin_tab2, fin_tab3 = st.tabs(["📊 Resumen Financiero", "💾 Gestionar Proyectos", "📈 Dashboard"])
-
-    with fin_tab1:
-        st.subheader("📊 Generar Resumen Financiero")
-
-        if 'loaded_project' in st.session_state and 'loaded_calculation' in st.session_state:
-            project_data = st.session_state['loaded_project']
-            calculation_data = st.session_state['loaded_calculation']
-
-            st.info(f"📋 Proyecto: {project_data.get('project_name', 'N/A')}")
-
-            # Quick financial metrics
-            if 'results_data' in calculation_data:
-                results = calculation_data['results_data']
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("TIR", f"{results.get('tasa_interna', 0):.1%}")
-                    st.metric("VPN", f"${results.get('valor_presente', 0):,.0f}")
-                with col2:
-                    st.metric("Payback", f"{results.get('payback_exacto', 0):.1f} años")
-                    st.metric("Valor Proyecto", f"${results.get('valor_proyecto_total', 0):,.0f}")
-
-            # Generate detailed reports
-            col_pdf, col_excel = st.columns(2)
-            with col_pdf:
-                if st.button("📄 Generar PDF Completo", use_container_width=True, key="mobile_gen_pdf"):
-                    try:
-                        pdf_bytes = financial_summary_generator.generate_financial_summary(
-                            project_data, calculation_data=calculation_data
-                        )
-                        filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-                        st.download_button(
-                            label="📥 Descargar PDF",
-                            data=pdf_bytes,
-                            file_name=filename,
-                            mime="application/pdf",
-                            use_container_width=True,
-                            key="mobile_download_pdf"
-                        )
-                        st.success("✅ PDF generado")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-
-            with col_excel:
-                if st.button("📊 Generar Excel", use_container_width=True, key="mobile_gen_excel"):
-                    try:
-                        excel_bytes = financial_summary_generator.generate_excel_summary(
-                            project_data, calculation_data=calculation_data
-                        )
-                        filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx"
-                        st.download_button(
-                            label="📥 Descargar Excel",
-                            data=excel_bytes,
-                            file_name=filename,
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True,
-                            key="mobile_download_excel"
-                        )
-                        st.success("✅ Excel generado")
-                    except Exception as e:
-                        st.error(f"❌ Error: {e}")
-        else:
-            st.warning("⚠️ Carge un proyecto primero para generar resumenes financieros")
-
-    with fin_tab2:
-        st.subheader("💾 Gestionar Proyectos")
-
-        # Save current project
-        if st.button("💾 Guardar Proyecto Actual", use_container_width=True, key="mobile_save_project"):
-            try:
-                if 'current_calculation' in st.session_state:
-                    project_data = {
-                        'client_name': st.session_state.get('cliente_data', {}).get('nombre', 'Cliente Móvil'),
-                        'project_name': f"Proyecto Móvil {datetime.datetime.now().strftime('%Y%m%d')}",
-                        'location': st.session_state.get('ciudad_mobile', 'Bogotá'),
-                        'base_calculation_id': ''
-                    }
-
-                    project_id = project_manager.save_project(project_data)
-
-                    # Save calculation
-                    calc_data = st.session_state['current_calculation']
-                    calc_id = project_manager.save_calculation(
-                        project_id,
-                        calc_data.get('input_data', {}),
-                        calc_data.get('results_data', {})
-                    )
-
-                    st.success(f"✅ Proyecto guardado: {project_id}")
-                else:
-                    st.warning("⚠️ Realice un cálculo primero")
-            except Exception as e:
-                st.error(f"❌ Error guardando proyecto: {e}")
-
-        # Load project
-        st.subheader("📂 Cargar Proyecto")
-        try:
-            projects = project_manager.list_projects('Active')
-            if projects:
-                project_names = [f"{p['project_id']} - {p['client_name']}" for p in projects]
-                selected = st.selectbox("Seleccionar proyecto:", project_names, key="mobile_project_select")
-
-                if selected and st.button("📂 Cargar Proyecto", use_container_width=True, key="mobile_load_project"):
-                    project_id = selected.split(' - ')[0]
-                    project_data = project_manager.load_project(project_id)
-
-                    if project_data.get('base_calculation_id'):
-                        calc_data = project_manager.load_calculation(project_data['base_calculation_id'])
-                        st.session_state['loaded_project'] = project_data
-                        st.session_state['loaded_calculation'] = calc_data
-
-                    st.success(f"✅ Proyecto '{project_data['project_name']}' cargado")
-            else:
-                st.info("No hay proyectos guardados")
-        except Exception as e:
-            st.error(f"Error cargando proyectos: {e}")
-
-    with fin_tab3:
-        st.subheader("📈 Dashboard de Proyectos")
-
-        try:
-            projects = project_manager.list_projects()
-            if projects:
-                # Statistics
-                total = len(projects)
-                active = len([p for p in projects if p['status'] == 'Active'])
-
-                col1, col2 = st.columns(2)
-                col1.metric("Total Proyectos", total)
-                col2.metric("Proyectos Activos", active)
-
-                # Recent projects
-                st.subheader("Proyectos Recientes")
-                recent_projects = sorted(projects, key=lambda x: x['created_date'], reverse=True)[:5]
-                for project in recent_projects:
-                    st.write(f"• **{project['project_name']}** - {project['client_name']} ({project['created_date'][:10]})")
-            else:
-                st.info("No hay proyectos para mostrar")
-        except Exception as e:
-            st.error(f"Error cargando dashboard: {e}")
 
 def render_desktop_interface():
     """Interfaz optimizada para desktop (tu interfaz actual)"""
@@ -2949,9 +2852,8 @@ def render_desktop_interface():
             n_aprox = 0.85  # Default efficiency value
             generacion_anual_inicial = potencia_efectiva * hsp_promedio * 365 * n_aprox
 
-            # O&M anual (5% del ahorro anual)
-            ahorro_anual_aprox = (Load * 12) * costkWh
-            om_anual = 0.10 * ahorro_anual_aprox
+            # O&M anual (2% del CAPEX)
+            om_anual = valor_proyecto_total * 0.02  # 2% del valor total del proyecto
 
             # Degradación anual
             tasa_degradacion_anual = 0.1  # 0.1% por año
@@ -2960,7 +2862,7 @@ def render_desktop_interface():
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("💰 Precio del Proyecto", f"${valor_proyecto_total:,.0f} COP")
-                st.metric("🔧 O&M Anual", f"${om_anual:,.0f} COP", help="5% del ahorro anual estimado")
+                st.metric("🔧 O&M Anual", f"${om_anual:,.0f} COP", help="2% del CAPEX (valor total del proyecto)")
                 st.metric("⚡ Generación Anual Inicial", f"{generacion_anual_inicial:,.0f} kWh")
 
             with col2:
@@ -3071,169 +2973,6 @@ def render_desktop_interface():
 
         # ==============================================================================
         # PROJECT MANAGEMENT SYSTEM
-        # ==============================================================================
-        st.markdown("---")
-        st.header("📁 GESTIÓN DE PROYECTOS")
-
-        if project_manager:
-            # Project Management Tabs
-            proj_tab1, proj_tab2, proj_tab3 = st.tabs(["💾 Guardar Proyecto", "📂 Cargar Proyecto", "📊 Dashboard"])
-
-            with proj_tab1:
-                st.subheader("💾 Guardar Proyecto Actual")
-                if st.button("Guardar Proyecto", use_container_width=True):
-                    try:
-                        # Get current project data from session state or form inputs
-                        project_data = {
-                            'client_name': nombre_cliente,
-                            'project_name': ubicacion or f"Proyecto {datetime.datetime.now().strftime('%Y%m%d')}",
-                            'location': ciudad_input,
-                            'base_calculation_id': st.session_state.get('current_calculation_id', '')
-                        }
-
-                        project_id = project_manager.save_project(project_data)
-                        st.success(f"✅ Proyecto guardado con ID: {project_id}")
-
-                        # Save current calculation if available
-                        if 'current_calculation' in st.session_state:
-                            calc_data = st.session_state['current_calculation']
-                            calc_id = project_manager.save_calculation(
-                                project_id,
-                                calc_data.get('input_data', {}),
-                                calc_data.get('results_data', {})
-                            )
-                            st.info(f"Cálculo base guardado con ID: {calc_id}")
-
-                    except Exception as e:
-                        st.error(f"❌ Error guardando proyecto: {e}")
-
-            with proj_tab2:
-                st.subheader("📂 Cargar Proyecto Existente")
-
-                # List available projects
-                try:
-                    projects = project_manager.list_projects('Active')
-                    if projects:
-                        project_options = [f"{p['project_id']} - {p['client_name']} - {p['project_name']}"
-                                         for p in projects]
-                        selected_project = st.selectbox("Seleccionar Proyecto:", project_options)
-
-                        if selected_project and st.button("Cargar Proyecto", use_container_width=True):
-                            project_id = selected_project.split(' - ')[0]
-                            project_data = project_manager.load_project(project_id)
-
-                            # Load base calculation
-                            if project_data.get('base_calculation_id'):
-                                try:
-                                    calc_data = project_manager.load_calculation(project_data['base_calculation_id'])
-                                    st.session_state['loaded_project'] = project_data
-                                    st.session_state['loaded_calculation'] = calc_data
-                                    st.success(f"✅ Proyecto '{project_data['project_name']}' cargado exitosamente")
-                                except Exception as e:
-                                    st.warning(f"No se pudo cargar el cálculo base: {e}")
-                            else:
-                                st.session_state['loaded_project'] = project_data
-                                st.success(f"✅ Proyecto '{project_data['project_name']}' cargado exitosamente")
-                    else:
-                        st.info("No hay proyectos guardados aún.")
-                except Exception as e:
-                    st.error(f"Error cargando proyectos: {e}")
-
-            with proj_tab3:
-                st.subheader("📊 Dashboard de Proyectos")
-
-                try:
-                    projects = project_manager.list_projects()
-                    if projects:
-                        # Project statistics
-                        total_projects = len(projects)
-                        active_projects = len([p for p in projects if p['status'] == 'Active'])
-
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Total Proyectos", total_projects)
-                        col2.metric("Proyectos Activos", active_projects)
-                        col3.metric("Proyectos Archivados", total_projects - active_projects)
-
-                        # Projects table
-                        st.subheader("Lista de Proyectos")
-                        projects_df = pd.DataFrame(projects)
-                        st.dataframe(projects_df[['project_id', 'client_name', 'project_name',
-                                                'location', 'created_date', 'status']], use_container_width=True)
-                    else:
-                        st.info("No hay proyectos para mostrar.")
-                except Exception as e:
-                    st.error(f"Error cargando dashboard: {e}")
-        else:
-            st.warning("⚠️ Sistema de gestión de proyectos no disponible. Verifique la configuración de Google Sheets.")
-
-    # ==============================================================================
-    # FINANCIAL SUMMARY GENERATOR
-    # ==============================================================================
-    st.markdown("---")
-    st.subheader("💼 GENERADOR DE RESUMENES FINANCIEROS")
-
-    if financial_summary_generator and 'loaded_project' in st.session_state:
-        st.info("📊 Proyecto cargado - Puede generar resumen financiero")
-
-        col_fs1, col_fs2 = st.columns(2)
-        with col_fs1:
-            if st.button("📄 Generar Resumen Financiero (PDF)", use_container_width=True, key="gen_financial_pdf"):
-                try:
-                    project_data = st.session_state['loaded_project']
-                    calculation_data = st.session_state.get('loaded_calculation', {})
-
-                    # Ensure the most recent calculation data is used
-                    calculation_data_to_pass = st.session_state.get('current_calculation', calculation_data)
-                    # Debug log to check the data being passed
-                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
-                    
-                    # Debug log to check the data being passed
-                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
-                    
-                    # Debug log to check the data being passed
-                    print(f"[DEBUG] Data for PDF generation: {calculation_data_to_pass}")
-                    
-                    pdf_bytes = financial_summary_generator.generate_financial_summary(
-                        project_data, calculation_data=calculation_data_to_pass
-                    )
-
-                    filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.pdf"
-                    st.download_button(
-                        label="📥 Descargar Resumen Financiero (PDF)",
-                        data=pdf_bytes,
-                        file_name=filename,
-                        mime="application/pdf",
-                        use_container_width=True,
-                        key="download_financial_pdf"
-                    )
-                    st.success("✅ Resumen financiero generado exitosamente")
-
-                except Exception as e:
-                    st.error(f"❌ Error generando resumen financiero: {e}")
-
-        with col_fs2:
-            if st.button("📊 Generar Resumen Financiero (Excel)", use_container_width=True, key="gen_financial_excel"):
-                try:
-                    project_data = st.session_state['loaded_project']
-                    calculation_data = st.session_state.get('loaded_calculation', {})
-
-                    excel_bytes = financial_summary_generator.generate_excel_summary(
-                        project_data, calculation_data=calculation_data
-                    )
-
-                    filename = f"Resumen_Financiero_{project_data['project_name']}_{datetime.datetime.now().strftime('%Y%m%d')}.xlsx"
-                    st.download_button(
-                        label="📥 Descargar Resumen Financiero (Excel)",
-                        data=excel_bytes,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        key="download_financial_excel"
-                    )
-                    st.success("✅ Resumen financiero en Excel generado exitosamente")
-
-                except Exception as e:
-                    st.error(f"❌ Error generando resumen financiero en Excel: {e}")
 
     # ==============================================================================
     # LÓGICA DE CÁLCULO Y VISUALIZACIÓN (AL PRESIONAR EL BOTÓN)
@@ -3252,28 +2991,6 @@ def render_desktop_interface():
             nombre_proyecto = f"FV{str(datetime.datetime.now().year)[-2:]}{numero_proyecto_del_año:03d} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
             st.success(f"Proyecto Generado: {nombre_proyecto}")
 
-            # Store calculation data for project management
-            calculation_input = {
-                'Load': Load,
-                'size': size,
-                'quantity': quantity,
-                'cubierta': cubierta,
-                'clima': clima,
-                'costkWh': costkWh,
-                'module': module,
-                'ciudad': ciudad_para_calculo,
-                'hsp_data': hsp_a_usar,
-                'index_input': index_input,
-                'dRate_input': dRate_input,
-                'perc_financiamiento': perc_financiamiento,
-                'tasa_interes_input': tasa_interes_input,
-                'plazo_credito_años': plazo_credito_años,
-                'incluir_baterias': incluir_baterias,
-                'costo_kwh_bateria': costo_kwh_bateria,
-                'dias_autonomia': dias_autonomia,
-                'horizonte_tiempo': horizonte_tiempo,
-                'precio_manual': precio_manual_valor if precio_manual and precio_manual_valor else None
-            }
 
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
@@ -3387,12 +3104,6 @@ def render_desktop_interface():
                 'generacion_promedio_mensual': generacion_promedio_mensual
             }
 
-            # Store in session state for project management
-            st.session_state['current_calculation'] = {
-                'input_data': calculation_input,
-                'results_data': calculation_results,
-                'timestamp': datetime.datetime.now().isoformat()
-            }
 
             # DEBUG: Mostrar información del cálculo principal
             print(f"\n=== DEBUG CÁLCULO PRINCIPAL ===")
@@ -3654,6 +3365,10 @@ def render_desktop_interface():
                 "Potencia de Paneles": f"{int(module)}",
                 "Potencia AC Inversor": f"{potencia_ac_inversor}",
             }
+            
+            # Calcular O&M (2% del CAPEX)
+            om_anual = valor_pdf_redondeado * 0.02  # 2% del valor total del proyecto
+            datos_para_pdf["O&M (Operation & Maintenance)"] = f"${om_anual:,.0f}"
             if usa_financiamiento:
                 # Recalcular financiamiento con el precio manual si está activado
                 if precio_manual and precio_manual_valor:
@@ -3734,6 +3449,8 @@ def render_desktop_interface():
                     incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
                 )
                 nombre_csv = f"Flujo_Caja_Detallado_{nombre_proyecto}.csv"
+                
+                # Botón de descarga
                 st.download_button(
                     label="📊 Descargar Flujo de Caja en CSV (Detallado)",
                     data=csv_content,
@@ -3742,6 +3459,45 @@ def render_desktop_interface():
                     use_container_width=True,
                     help="Descarga un archivo CSV con el flujo de caja anual detallado, incluyendo generación, consumo, costos, TIR/VPN parciales y más métricas"
                 )
+                
+                # Guardar automáticamente en Google Drive (carpeta Administrativo y Financiero)
+                try:
+                    if 'drive_service' in locals() and drive_service:
+                        # Buscar la carpeta del proyecto por nombre
+                        query_proyecto = f"name='{nombre_proyecto}' and mimeType='application/vnd.google-apps.folder'"
+                        results_proyecto = drive_service.files().list(
+                            q=query_proyecto, 
+                            fields="files(id)", 
+                            supportsAllDrives=True, 
+                            includeItemsFromAllDrives=True
+                        ).execute()
+                        
+                        if results_proyecto.get('files'):
+                            id_carpeta_principal = results_proyecto['files'][0]['id']
+                            
+                            # Buscar carpeta "08_Administrativo_y_Financiero"
+                            query_administrativo = f"'{id_carpeta_principal}' in parents and name='08_Administrativo_y_Financiero'"
+                            results_administrativo = drive_service.files().list(
+                                q=query_administrativo, 
+                                fields="files(id)", 
+                                supportsAllDrives=True, 
+                                includeItemsFromAllDrives=True
+                            ).execute()
+                            
+                            if results_administrativo.get('files'):
+                                id_carpeta_administrativo = results_administrativo['files'][0]['id']
+                                csv_link = subir_csv_a_drive(drive_service, id_carpeta_administrativo, nombre_csv, csv_content)
+                                if csv_link:
+                                    st.success("✅ CSV del flujo de caja guardado automáticamente en Google Drive")
+                            else:
+                                st.warning("⚠️ No se encontró la carpeta '08_Administrativo_y_Financiero'")
+                        else:
+                            st.info("ℹ️ Proyecto no encontrado en Google Drive")
+                    else:
+                        st.info("ℹ️ CSV generado localmente (Google Drive no configurado)")
+                except Exception as drive_error:
+                    st.warning(f"⚠️ No se pudo guardar el CSV en Google Drive: {drive_error}")
+                    
             except Exception as csv_error:
                 st.warning(f"No se pudo generar el CSV: {csv_error}")
             st.success('¡Proceso completado!')
@@ -3826,6 +3582,19 @@ def main():
     # Inicializar session_state si no existe
     if 'force_mobile' not in st.session_state:
         st.session_state.force_mobile = False
+    
+    # Inicializar otras variables de session_state que podrían ser necesarias
+    if 'first_load' not in st.session_state:
+        st.session_state.first_load = False
+    
+    if 'sistema_data' not in st.session_state:
+        st.session_state.sistema_data = {}
+    
+    if 'cliente_data' not in st.session_state:
+        st.session_state.cliente_data = {}
+    
+    if 'ubicacion_data' not in st.session_state:
+        st.session_state.ubicacion_data = {}
     
     # Sidebar simple para control de modo
     with st.sidebar:
