@@ -16,9 +16,9 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 import requests
+import time
 import googlemaps
 from geopy.geocoders import Nominatim
-import time
 from docx import Document
 from num2words import num2words
 from PyPDF2 import PdfReader, PdfWriter
@@ -1412,8 +1412,28 @@ def get_pvgis_hsp(lat, lon):
             'components': 1,  # Incluir componentes directos y difusos
         }
         
-        response = requests.get(api_url, params=params, timeout=30)
-        response.raise_for_status()
+        # Configurar timeout más largo y reintentos
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        # Intentar con timeout más largo y reintentos
+        max_retries = 3
+        timeout = 60  # 60 segundos
+        
+        for attempt in range(max_retries):
+            try:
+                response = session.get(api_url, params=params, timeout=timeout)
+                response.raise_for_status()
+                break  # Si es exitoso, salir del bucle
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                if attempt == max_retries - 1:  # Último intento
+                    st.warning(f"PVGIS no disponible después de {max_retries} intentos. Usando promedios de ciudad.")
+                    return None
+                else:
+                    st.info(f"Reintentando conexión con PVGIS... (intento {attempt + 2}/{max_retries})")
+                    time.sleep(2)  # Esperar 2 segundos antes del siguiente intento
         
         # Verificar que la respuesta no esté vacía
         if not response.content:
