@@ -16,6 +16,8 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import googlemaps
 from geopy.geocoders import Nominatim
 import time
@@ -1390,18 +1392,102 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
     return lista_materiales
     
-# Reemplaza tu función get_pvgis_hsp con esta versión de depuración
+# Cache para datos PVGIS para evitar llamadas repetidas
+PVGIS_CACHE = {}
+
+def get_cached_pvgis_data(lat, lon, cache_duration_hours=24):
+    """
+    Obtiene datos PVGIS del cache si están disponibles y no han expirado.
+    """
+    cache_key = f"{lat:.4f}_{lon:.4f}"
+    
+    if cache_key in PVGIS_CACHE:
+        cached_data, timestamp = PVGIS_CACHE[cache_key]
+        current_time = time.time()
+        
+        # Verificar si el cache no ha expirado
+        if current_time - timestamp < (cache_duration_hours * 3600):
+            st.info(f"📋 Usando datos PVGIS en caché para lat: {lat:.4f}, lon: {lon:.4f}")
+            return cached_data
+        else:
+            # Cache expirado, eliminarlo
+            del PVGIS_CACHE[cache_key]
+    
+    return None
+
+def cache_pvgis_data(lat, lon, data):
+    """
+    Guarda datos PVGIS en el cache.
+    """
+    cache_key = f"{lat:.4f}_{lon:.4f}"
+    PVGIS_CACHE[cache_key] = (data, time.time())
+    
+    # Limpiar cache si tiene más de 100 entradas
+    if len(PVGIS_CACHE) > 100:
+        # Eliminar las entradas más antiguas
+        sorted_items = sorted(PVGIS_CACHE.items(), key=lambda x: x[1][1])
+        for key, _ in sorted_items[:50]:  # Eliminar las 50 más antiguas
+            del PVGIS_CACHE[key]
+
+# Función para crear una sesión robusta con retry logic
+def create_robust_session():
+    """
+    Crea una sesión de requests con retry logic y connection pooling para mejor manejo de timeouts.
+    """
+    session = requests.Session()
+    
+    # Configurar retry strategy
+    retry_strategy = Retry(
+        total=3,  # Número total de reintentos
+        backoff_factor=1,  # Factor de espera entre reintentos (1, 2, 4 segundos)
+        status_forcelist=[429, 500, 502, 503, 504],  # Códigos de estado para reintentar
+        allowed_methods=["HEAD", "GET", "OPTIONS"]  # Métodos HTTP para reintentar
+    )
+    
+    # Configurar adapter con retry strategy
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=10,  # Número de pools de conexión
+        pool_maxsize=20,  # Máximo número de conexiones en el pool
+        pool_block=False  # No bloquear cuando el pool está lleno
+    )
+    
+    # Montar el adapter en la sesión
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    # Configurar headers para mejor compatibilidad
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+    })
+    
+    return session
+
+# Reemplaza tu función get_pvgis_hsp con esta versión mejorada
 
 def get_pvgis_hsp(lat, lon):
     """
     Se conecta a PVGIS, obtiene la radiación total mensual y la convierte a HSP diario.
-    Incluye fallbacks robustos para datos incompletos.
+    Incluye fallbacks robustos para datos incompletos y manejo mejorado de timeouts.
     """
     try:
         # Validar coordenadas
         if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
             st.warning("Coordenadas fuera de rango válido. Usando promedios de ciudad.")
             return None
+        
+        # Verificar cache primero
+        cached_data = get_cached_pvgis_data(lat, lon)
+        if cached_data is not None:
+            return cached_data
+        
+        # Crear sesión robusta
+        session = create_robust_session()
         
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
         params = {
@@ -1412,14 +1498,40 @@ def get_pvgis_hsp(lat, lon):
             'components': 1,  # Incluir componentes directos y difusos
         }
         
-        response = requests.get(api_url, params=params, timeout=30)
+        # Mostrar progreso al usuario
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        status_text.text("🔄 Conectando con PVGIS...")
+        progress_bar.progress(20)
+        
+        # Intentar conexión con timeout extendido y reintentos
+        try:
+            response = session.get(api_url, params=params, timeout=(10, 60))  # (connect_timeout, read_timeout)
+            progress_bar.progress(60)
+            status_text.text("📡 Procesando datos de PVGIS...")
+            
+        except requests.exceptions.ConnectTimeout:
+            st.error("⏰ Timeout de conexión con PVGIS. El servidor no responde.")
+            return show_pvgis_retry_option(lat, lon)
+            
+        except requests.exceptions.ReadTimeout:
+            st.error("⏰ Timeout de lectura con PVGIS. La respuesta tardó demasiado.")
+            return show_pvgis_retry_option(lat, lon)
+            
+        except requests.exceptions.ConnectionError as e:
+            st.error(f"🔌 Error de conexión con PVGIS: {str(e)}")
+            return show_pvgis_retry_option(lat, lon)
+        
         response.raise_for_status()
+        progress_bar.progress(80)
         
         # Verificar que la respuesta no esté vacía
         if not response.content:
             raise ValueError("Respuesta vacía del servidor PVGIS")
             
         data = response.json()
+        progress_bar.progress(90)
         
         # Verificar estructura de datos
         if not isinstance(data, dict):
@@ -1501,17 +1613,53 @@ def get_pvgis_hsp(lat, lon):
                 else:
                     hsp_mensual[i] = round(3.5 + 1.5 * math.sin(2 * math.pi * i / 12), 2)
         
+        progress_bar.progress(100)
+        status_text.text("✅ Datos HSP obtenidos exitosamente de PVGIS")
+        time.sleep(1)  # Mostrar el mensaje de éxito por un momento
+        progress_bar.empty()
+        status_text.empty()
+        
+        # Guardar en cache para futuras consultas
+        cache_pvgis_data(lat, lon, hsp_mensual)
+        
         st.success(f"✅ Datos HSP obtenidos de PVGIS para lat: {lat:.4f}, lon: {lon:.4f}")
         return hsp_mensual
         
     except requests.exceptions.RequestException as e:
-        st.warning(f"Error de red al conectar con PVGIS: {e}")
-        st.info("Usando datos estimados basados en la ubicación.")
-        return get_hsp_estimado(lat, lon)
+        st.error(f"❌ Error de red al conectar con PVGIS: {e}")
+        return show_pvgis_retry_option(lat, lon)
     except Exception as e:
-        st.warning(f"Error al procesar los datos de PVGIS: {e}")
-        st.info("Usando datos estimados basados en la ubicación.")
-        return get_hsp_estimado(lat, lon)
+        st.error(f"❌ Error al procesar los datos de PVGIS: {e}")
+        return show_pvgis_retry_option(lat, lon)
+
+def show_pvgis_retry_option(lat, lon):
+    """
+    Muestra opciones de reintento cuando PVGIS falla.
+    """
+    st.error("❌ No se pudo conectar con PVGIS")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("🔄 Reintentar conexión", key="retry_pvgis"):
+            # Limpiar cache para forzar nueva consulta
+            cache_key = f"{lat:.4f}_{lon:.4f}"
+            if cache_key in PVGIS_CACHE:
+                del PVGIS_CACHE[cache_key]
+            st.rerun()
+    
+    with col2:
+        if st.button("📊 Usar datos estimados", key="use_estimated"):
+            st.info("Usando datos estimados basados en la ubicación geográfica.")
+            return get_hsp_estimado(lat, lon)
+    
+    st.info("💡 **Sugerencias para resolver el problema:**")
+    st.info("• Verifica tu conexión a internet")
+    st.info("• El servidor PVGIS puede estar temporalmente fuera de servicio")
+    st.info("• Intenta nuevamente en unos minutos")
+    st.info("• Usa los datos estimados como alternativa")
+    
+    return None
 
 def get_hsp_estimado(lat, lon):
     """
