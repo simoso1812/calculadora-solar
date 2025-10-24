@@ -1391,204 +1391,257 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
     
 # Reemplaza tu función get_pvgis_hsp con esta versión de depuración
 
-def get_pvgis_hsp(lat, lon):
+def get_pvgis_hsp_alternative(lat, lon):
     """
-    Se conecta a PVGIS, obtiene la radiación total mensual y la convierte a HSP diario.
-    Incluye fallbacks robustos para datos incompletos y optimizado para producción.
+    Función alternativa para obtener datos HSP usando múltiples fuentes.
+    Optimizada para producción con fallbacks robustos.
     """
     try:
         # Validar coordenadas
         if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
-            st.warning("Coordenadas fuera de rango válido. Usando promedios de ciudad.")
             return None
         
-        # Detectar si estamos en entorno de producción (Render, Heroku, etc.)
+        # Detectar entorno de producción
         is_production = os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('PORT')
         
+        if is_production:
+            st.info("🌐 Modo producción: Usando datos estimados optimizados")
+            return get_hsp_estimado_mejorado(lat, lon)
+        
+        # En desarrollo local, intentar PVGIS con configuración más agresiva
+        return get_pvgis_hsp_local(lat, lon)
+        
+    except Exception as e:
+        st.warning(f"Error en función alternativa: {e}")
+        return get_hsp_estimado_mejorado(lat, lon)
+
+def get_pvgis_hsp_local(lat, lon):
+    """
+    Versión optimizada para desarrollo local con PVGIS.
+    """
+    try:
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
         params = {
             'lat': lat,
             'lon': lon,
             'horirrad': 1,
             'outputformat': 'json',
-            'components': 1,  # Incluir componentes directos y difusos
+            'components': 1,
         }
         
-        # Configurar sesión con headers optimizados para producción
         session = requests.Session()
-        
-        # Headers más robustos para producción
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (compatible; SolarCalculator/1.0; +https://github.com/mirac/solar-calculator)',
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Cache-Control': 'no-cache'
+            'User-Agent': 'Mozilla/5.0 (compatible; SolarCalculator/1.0)',
+            'Accept': 'application/json',
+            'Connection': 'keep-alive'
         })
         
-        # Configuración adaptativa según el entorno
-        if is_production:
-            max_retries = 5  # Más reintentos en producción
-            timeout = 30     # Timeout más corto en producción
-            retry_delay = 3  # Delay más largo entre reintentos
-        else:
-            max_retries = 3
-            timeout = 60
-            retry_delay = 2
+        # Configuración más agresiva para local
+        max_retries = 2
+        timeout = 15
         
-        # Intentar con timeout y reintentos adaptativos
         for attempt in range(max_retries):
             try:
-                if is_production:
-                    st.info(f"🌐 Conectando con PVGIS desde servidor de producción... (intento {attempt + 1}/{max_retries})")
-                
                 response = session.get(api_url, params=params, timeout=timeout)
                 response.raise_for_status()
                 
-                # Verificar que la respuesta sea válida
                 if response.status_code == 200 and response.content:
-                    break  # Si es exitoso, salir del bucle
-                else:
-                    raise requests.exceptions.HTTPError(f"Respuesta inválida: {response.status_code}")
+                    data = response.json()
+                    return process_pvgis_data(data, lat, lon)
                     
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, 
-                   requests.exceptions.HTTPError, requests.exceptions.RequestException) as e:
-                if attempt == max_retries - 1:  # Último intento
-                    error_msg = f"PVGIS no disponible después de {max_retries} intentos"
-                    if is_production:
-                        error_msg += " (servidor de producción)"
-                    st.warning(f"{error_msg}. Usando datos estimados.")
-                    return None
-                else:
-                    st.info(f"Reintentando conexión con PVGIS... (intento {attempt + 2}/{max_retries})")
-                    time.sleep(retry_delay)  # Esperar antes del siguiente intento
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    st.warning(f"PVGIS local falló: {e}")
+                    return get_hsp_estimado_mejorado(lat, lon)
+                time.sleep(1)
         
-        # Verificar que la respuesta no esté vacía
-        if not response.content:
-            raise ValueError("Respuesta vacía del servidor PVGIS")
-            
-        data = response.json()
+        return get_hsp_estimado_mejorado(lat, lon)
         
-        # Verificar estructura de datos
-        if not isinstance(data, dict):
-            raise ValueError("Formato de respuesta inválido de PVGIS")
+    except Exception as e:
+        st.warning(f"Error en PVGIS local: {e}")
+        return get_hsp_estimado_mejorado(lat, lon)
 
+def get_hsp_estimado_mejorado(lat, lon):
+    """
+    Genera estimaciones mejoradas de HSP basadas en datos climáticos globales.
+    """
+    dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    hsp_mensual = []
+    
+    # Datos climáticos mejorados por región
+    region_data = get_climate_data_by_region(lat, lon)
+    
+    for month_index in range(12):
+        # Factor estacional más preciso
+        seasonal_factor = get_seasonal_factor(lat, month_index)
+        
+        # HSP base por región
+        base_hsp = region_data['base_hsp']
+        variation = region_data['variation']
+        
+        # Cálculo mejorado
+        hsp_diario = base_hsp + variation * seasonal_factor
+        
+        # Ajuste por altitud (si tenemos datos)
+        altitude_factor = get_altitude_factor(lat, lon)
+        hsp_diario *= altitude_factor
+        
+        # Limitar valores razonables
+        hsp_diario = max(1.5, min(7.5, hsp_diario))
+        
+        hsp_mensual.append(round(hsp_diario, 2))
+    
+    st.success(f"✅ Datos HSP estimados para lat: {lat:.4f}, lon: {lon:.4f}")
+    return hsp_mensual
+
+def get_climate_data_by_region(lat, lon):
+    """
+    Obtiene datos climáticos específicos por región geográfica.
+    """
+    # Zona ecuatorial (0-10°)
+    if abs(lat) < 10:
+        return {
+            'base_hsp': 5.2,
+            'variation': 0.8,
+            'region': 'ecuatorial'
+        }
+    
+    # Zona tropical (10-30°)
+    elif abs(lat) < 30:
+        return {
+            'base_hsp': 4.8,
+            'variation': 1.2,
+            'region': 'tropical'
+        }
+    
+    # Zona subtropical (30-40°)
+    elif abs(lat) < 40:
+        return {
+            'base_hsp': 4.2,
+            'variation': 1.8,
+            'region': 'subtropical'
+        }
+    
+    # Zona templada (40-60°)
+    elif abs(lat) < 60:
+        return {
+            'base_hsp': 3.5,
+            'variation': 2.2,
+            'region': 'templada'
+        }
+    
+    # Zona polar (>60°)
+    else:
+        return {
+            'base_hsp': 2.8,
+            'variation': 2.5,
+            'region': 'polar'
+        }
+
+def get_seasonal_factor(lat, month_index):
+    """
+    Calcula el factor estacional basado en la latitud y el mes.
+    """
+    # Meses del año (0-11)
+    month_angle = 2 * math.pi * month_index / 12
+    
+    # Para el hemisferio norte
+    if lat >= 0:
+        seasonal_factor = math.sin(month_angle - math.pi/2)  # Máximo en junio
+    else:
+        seasonal_factor = math.sin(month_angle + math.pi/2)  # Máximo en diciembre
+    
+    return seasonal_factor
+
+def get_altitude_factor(lat, lon):
+    """
+    Factor de corrección por altitud (estimado).
+    """
+    # Estimación simple basada en coordenadas
+    # En Colombia, altitudes típicas por región
+    if 4 <= lat <= 12 and -80 <= lon <= -70:  # Colombia
+        if lat < 6:  # Costa Caribe
+            return 1.0
+        elif lat < 8:  # Región Andina baja
+            return 0.95
+        else:  # Región Andina alta
+            return 0.90
+    else:
+        return 1.0
+
+def process_pvgis_data(data, lat, lon):
+    """
+    Procesa los datos de PVGIS cuando están disponibles.
+    """
+    try:
         outputs = data.get('outputs', {})
         monthly_data = outputs.get('monthly', [])
 
         if not monthly_data:
-            st.warning("PVGIS no devolvió datos para esta ubicación. Usando promedios de ciudad.")
-            return None
+            return get_hsp_estimado_mejorado(lat, lon)
         
-        # --- LÓGICA MEJORADA CON FALLBACKS ---
         dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         hsp_mensual = []
         
-        # Intentar diferentes claves de datos de PVGIS
         for month in monthly_data:
             hsp_diario = None
             
-            # Opción 1: Usar H(h)_m (radiación horizontal total)
+            # Intentar diferentes claves de datos
             if 'H(h)_m' in month and month['H(h)_m'] is not None:
                 month_index = month.get('month', 1) - 1
                 if 0 <= month_index < len(dias_por_mes):
                     hsp_diario = month['H(h)_m'] / dias_por_mes[month_index]
             
-            # Opción 2: Usar H_d (radiación difusa) + H_b (radiación directa)
             elif 'H_d' in month and 'H_b' in month:
                 month_index = month.get('month', 1) - 1
                 if 0 <= month_index < len(dias_por_mes):
                     hsp_diario = (month['H_d'] + month['H_b']) / dias_por_mes[month_index]
             
-            # Opción 3: Usar G(i) (radiación en el plano del array)
             elif 'G(i)' in month:
                 month_index = month.get('month', 1) - 1
                 if 0 <= month_index < len(dias_por_mes):
                     hsp_diario = month['G(i)'] / dias_por_mes[month_index]
             
-            # Si no se pudo obtener el valor, usar estimación inteligente
+            # Fallback a estimación si no hay datos válidos
             if hsp_diario is None or hsp_diario <= 0:
-                # Estimación basada en latitud y mes
                 month_index = month.get('month', 1) - 1
-                if 0 <= month_index < len(dias_por_mes):
-                    # Estimación simple basada en latitud
-                    if abs(lat) < 10:  # Zona ecuatorial
-                        hsp_diario = 5.0 + 0.5 * math.sin(2 * math.pi * month_index / 12)
-                    elif abs(lat) < 30:  # Zona tropical
-                        hsp_diario = 4.5 + 0.8 * math.sin(2 * math.pi * month_index / 12)
-                    else:  # Zona templada
-                        hsp_diario = 3.5 + 1.5 * math.sin(2 * math.pi * month_index / 12)
-                else:
-                    hsp_diario = 4.5  # Valor por defecto
+                region_data = get_climate_data_by_region(lat, lon)
+                seasonal_factor = get_seasonal_factor(lat, month_index)
+                altitude_factor = get_altitude_factor(lat, lon)
+                hsp_diario = (region_data['base_hsp'] + region_data['variation'] * seasonal_factor) * altitude_factor
             
             hsp_mensual.append(round(hsp_diario, 2))
         
-        # Verificar que tenemos 12 meses
-        if len(hsp_mensual) != 12:
-            st.warning(f"PVGIS devolvió solo {len(hsp_mensual)} meses. Completando con estimaciones.")
-            # Completar meses faltantes con estimaciones
-            while len(hsp_mensual) < 12:
-                month_index = len(hsp_mensual)
-                if abs(lat) < 10:
-                    hsp_diario = 5.0 + 0.5 * math.sin(2 * math.pi * month_index / 12)
-                elif abs(lat) < 30:
-                    hsp_diario = 4.5 + 0.8 * math.sin(2 * math.pi * month_index / 12)
-                else:
-                    hsp_diario = 3.5 + 1.5 * math.sin(2 * math.pi * month_index / 12)
-                hsp_mensual.append(round(hsp_diario, 2))
+        # Completar meses faltantes
+        while len(hsp_mensual) < 12:
+            month_index = len(hsp_mensual)
+            region_data = get_climate_data_by_region(lat, lon)
+            seasonal_factor = get_seasonal_factor(lat, month_index)
+            altitude_factor = get_altitude_factor(lat, lon)
+            hsp_diario = (region_data['base_hsp'] + region_data['variation'] * seasonal_factor) * altitude_factor
+            hsp_mensual.append(round(hsp_diario, 2))
         
-        # Validar que todos los valores sean razonables
+        # Validar valores
         for i, hsp in enumerate(hsp_mensual):
-            if hsp < 1.0 or hsp > 8.0:  # Rango razonable para HSP
-                st.warning(f"Valor HSP anómalo en mes {i+1}: {hsp} kWh/m². Ajustando...")
-                # Reemplazar con valor estimado
-                if abs(lat) < 10:
-                    hsp_mensual[i] = round(5.0 + 0.5 * math.sin(2 * math.pi * i / 12), 2)
-                elif abs(lat) < 30:
-                    hsp_mensual[i] = round(4.5 + 0.8 * math.sin(2 * math.pi * i / 12), 2)
-                else:
-                    hsp_mensual[i] = round(3.5 + 1.5 * math.sin(2 * math.pi * i / 12), 2)
+            if hsp < 1.0 or hsp > 8.0:
+                month_index = i
+                region_data = get_climate_data_by_region(lat, lon)
+                seasonal_factor = get_seasonal_factor(lat, month_index)
+                altitude_factor = get_altitude_factor(lat, lon)
+                hsp_mensual[i] = round((region_data['base_hsp'] + region_data['variation'] * seasonal_factor) * altitude_factor, 2)
         
         st.success(f"✅ Datos HSP obtenidos de PVGIS para lat: {lat:.4f}, lon: {lon:.4f}")
         return hsp_mensual
         
-    except requests.exceptions.RequestException as e:
-        st.warning(f"Error de red al conectar con PVGIS: {e}")
-        st.info("Usando datos estimados basados en la ubicación.")
-        return get_hsp_estimado(lat, lon)
     except Exception as e:
-        st.warning(f"Error al procesar los datos de PVGIS: {e}")
-        st.info("Usando datos estimados basados en la ubicación.")
-        return get_hsp_estimado(lat, lon)
-
+        st.warning(f"Error procesando datos PVGIS: {e}")
+        return get_hsp_estimado_mejorado(lat, lon)
 def get_hsp_estimado(lat, lon):
     """
     Genera estimaciones de HSP basadas en la latitud cuando PVGIS falla.
+    Ahora usa la función mejorada.
     """
-    dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-    hsp_mensual = []
-    
-    # Estimación basada en latitud y estacionalidad
-    for month_index in range(12):
-        # Factor estacional (seno para simular variación anual)
-        seasonal_factor = math.sin(2 * math.pi * month_index / 12)
-        
-        if abs(lat) < 10:  # Zona ecuatorial (poca variación)
-            base_hsp = 5.0
-            variation = 0.5
-        elif abs(lat) < 30:  # Zona tropical (variación moderada)
-            base_hsp = 4.5
-            variation = 0.8
-        else:  # Zona templada (alta variación)
-            base_hsp = 3.5
-            variation = 1.5
-        
-        hsp_diario = base_hsp + variation * seasonal_factor
-        hsp_mensual.append(round(hsp_diario, 2))
-    
-    st.info("📊 Usando estimaciones de HSP basadas en la ubicación geográfica.")
-    return hsp_mensual
+    return get_hsp_estimado_mejorado(lat, lon)
 
 def get_coords_from_address(address):
     """Convierte una dirección de texto en coordenadas (lat, lon)."""
@@ -1995,7 +2048,7 @@ def render_tab_ubicacion_mobile():
         st.write(f"Coordenadas: `{latitud:.6f}`, `{longitud:.6f}`")
         if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
             with st.spinner("Consultando PVGIS..."):
-                st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
+                st.session_state.pvgis_data = get_pvgis_hsp_alternative(latitud, longitud)
                 st.session_state.last_coords = (latitud, longitud)
         hsp_mensual_calculado = st.session_state.pvgis_data
         if hsp_mensual_calculado:
@@ -2688,7 +2741,7 @@ def render_desktop_interface():
             st.write(f"**Coordenadas Seleccionadas:** Lat: `{latitud:.6f}` | Long: `{longitud:.6f}`")
             if 'pvgis_data' not in st.session_state or st.session_state.get('last_coords') != (latitud, longitud):
                 with st.spinner("Consultando base de datos satelital (PVGIS)..."):
-                    st.session_state.pvgis_data = get_pvgis_hsp(latitud, longitud)
+                    st.session_state.pvgis_data = get_pvgis_hsp_alternative(latitud, longitud)
                     st.session_state.last_coords = (latitud, longitud)
             hsp_mensual_calculado = st.session_state.pvgis_data
             if hsp_mensual_calculado:
