@@ -48,7 +48,7 @@ financial_summary_generator = None
 HSP_MENSUAL_POR_CIUDAD = {
     # Datos de HSP promedio mensual (kWh/m²/día)
     # Fuente: PVGIS y promedios históricos de radiación solar.
-    "MEDELLIN":    [4.38, 4.49, 4.51, 4.31, 4.20, 4.35, 4.80, 4.71, 4.40, 4.15, 4.05, 4.19],
+    "MEDELLIN":    [4.39, 4.49, 4.51, 4.31, 4.20, 4.35, 4.80, 4.71, 4.40, 4.15, 4.05, 4.19],
     "BOGOTA":      [4.35, 4.48, 4.21, 3.89, 3.70, 3.81, 4.25, 4.30, 4.10, 3.95, 3.88, 4.15],
     "CALI":        [4.80, 4.95, 4.85, 4.60, 4.50, 4.75, 5.10, 5.05, 4.80, 4.65, 4.55, 4.68],
     "BARRANQUILLA":[5.10, 5.35, 5.80, 5.90, 5.75, 5.85, 5.95, 5.80, 5.45, 5.15, 4.90, 4.95],
@@ -1152,7 +1152,6 @@ class PropuestaPDF(FPDF):
         self.add_page()
         self.image('assets/13.jpg', x=0, y=0, w=210)
         
-
         
     def crear_pagina_contacto(self):
         self.add_page()
