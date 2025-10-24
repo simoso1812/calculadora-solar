@@ -1394,13 +1394,16 @@ def calcular_lista_materiales(quantity, cubierta, module_power, inverter_info):
 def get_pvgis_hsp(lat, lon):
     """
     Se conecta a PVGIS, obtiene la radiación total mensual y la convierte a HSP diario.
-    Incluye fallbacks robustos para datos incompletos.
+    Incluye fallbacks robustos para datos incompletos y optimizado para producción.
     """
     try:
         # Validar coordenadas
         if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
             st.warning("Coordenadas fuera de rango válido. Usando promedios de ciudad.")
             return None
+        
+        # Detectar si estamos en entorno de producción (Render, Heroku, etc.)
+        is_production = os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('PORT')
         
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
         params = {
@@ -1411,28 +1414,55 @@ def get_pvgis_hsp(lat, lon):
             'components': 1,  # Incluir componentes directos y difusos
         }
         
-        # Configurar timeout más largo y reintentos
+        # Configurar sesión con headers optimizados para producción
         session = requests.Session()
+        
+        # Headers más robustos para producción
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'Mozilla/5.0 (compatible; SolarCalculator/1.0; +https://github.com/mirac/solar-calculator)',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache'
         })
         
-        # Intentar con timeout más largo y reintentos
-        max_retries = 3
-        timeout = 60  # 60 segundos
+        # Configuración adaptativa según el entorno
+        if is_production:
+            max_retries = 5  # Más reintentos en producción
+            timeout = 30     # Timeout más corto en producción
+            retry_delay = 3  # Delay más largo entre reintentos
+        else:
+            max_retries = 3
+            timeout = 60
+            retry_delay = 2
         
+        # Intentar con timeout y reintentos adaptativos
         for attempt in range(max_retries):
             try:
+                if is_production:
+                    st.info(f"🌐 Conectando con PVGIS desde servidor de producción... (intento {attempt + 1}/{max_retries})")
+                
                 response = session.get(api_url, params=params, timeout=timeout)
                 response.raise_for_status()
-                break  # Si es exitoso, salir del bucle
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                
+                # Verificar que la respuesta sea válida
+                if response.status_code == 200 and response.content:
+                    break  # Si es exitoso, salir del bucle
+                else:
+                    raise requests.exceptions.HTTPError(f"Respuesta inválida: {response.status_code}")
+                    
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, 
+                   requests.exceptions.HTTPError, requests.exceptions.RequestException) as e:
                 if attempt == max_retries - 1:  # Último intento
-                    st.warning(f"PVGIS no disponible después de {max_retries} intentos. Usando promedios de ciudad.")
+                    error_msg = f"PVGIS no disponible después de {max_retries} intentos"
+                    if is_production:
+                        error_msg += " (servidor de producción)"
+                    st.warning(f"{error_msg}. Usando datos estimados.")
                     return None
                 else:
                     st.info(f"Reintentando conexión con PVGIS... (intento {attempt + 2}/{max_retries})")
-                    time.sleep(2)  # Esperar 2 segundos antes del siguiente intento
+                    time.sleep(retry_delay)  # Esperar antes del siguiente intento
         
         # Verificar que la respuesta no esté vacía
         if not response.content:
