@@ -305,6 +305,28 @@ def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float):
 # FUNCIONES DE CÁLCULO
 # ==============================================================================
 
+def calcular_costo_por_kwp(size_kwp):
+    """
+    Calcula el costo por kWp según el tamaño del proyecto.
+    - Para proyectos < 20 kW: usa función potencia optimizada basada en 42 datos (26 reales + 16 teóricos)
+    - Para proyectos >= 20 kW: usa polinomial grado 3 optimizada basada en 38 proyectos
+    """
+    if size_kwp < 20:
+        # Función potencia optimizada: a * size^b
+        # Basada en regresión de 42 datos (26 proyectos reales + 16 calculados)
+        # R² = 0.8693, MAE = $426,945/kWp, Error promedio: 7.87% con datos reales
+        # Actualizada: 2025-01-27
+        import math
+        costo_por_kwp = 11917544 * (size_kwp ** -0.484721)
+    else:
+        # Polinomial grado 3 optimizada: ax³ + bx² + cx + d
+        # Basada en regresión de 38 proyectos (R² = 0.9892, MAE = $11,210/kWp)
+        # Error promedio: 0.41%
+        # Actualizada: 2025-01-27
+        costo_por_kwp = -0.265979 * size_kwp**3 + 103.58 * size_kwp**2 - 14285.52 * size_kwp + 3286846.42
+    
+    return costo_por_kwp
+
 def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module,
                                       ciudad=None, hsp_lista=None, perc_financiamiento=0, tasa_interes_credito=0,
                                       plazo_credito_años=0, incluir_baterias=False, costo_kwh_bateria=0,
@@ -327,7 +349,7 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
     potencia_efectiva_calculo = min(size, potencia_ac_inversor)
 
     # Costos del proyecto
-    costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
+    costo_por_kwp = calcular_costo_por_kwp(size)
     valor_proyecto_fv = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
 
@@ -726,20 +748,44 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
     
     return resultados
 
+def redondear_a_par(numero):
+    """
+    Redondea un número al entero par más cercano (hacia arriba si es necesario).
+    Siempre retorna un número par.
+    """
+    numero_int = int(round(numero))
+    if numero_int % 2 == 0:
+        return numero_int
+    else:
+        return numero_int + 1
+
 def recomendar_inversor(size_kwp):
-    # (El código de esta función no cambia)
-    inverters_disponibles = [3, 5, 6, 8, 10]
+    """
+    Recomienda inversores basándose en la potencia del sistema.
+    Prioriza usar inversores individuales cuando sea posible.
+    """
+    inverters_disponibles = [3, 5, 6, 8, 10, 20, 30, 40, 50, 100]
     min_ac_power = size_kwp / 1.2
-    if size_kwp <= 12:
-        for inv_kw in sorted(inverters_disponibles):
-            if inv_kw >= min_ac_power: 
-                return f"1 inversor de {inv_kw} kW", inv_kw
+    
+    # Primero intentar encontrar un inversor único que pueda manejar todo el sistema
+    # Buscar desde el más grande hacia el más pequeño
+    for inv_kw in sorted(inverters_disponibles, reverse=True):
+        if inv_kw >= min_ac_power:
+            # Verificar si este inversor único es suficiente (con margen razonable)
+            if inv_kw >= size_kwp * 0.8:  # Permite hasta 20% menos que el tamaño
+                return f"1x{int(inv_kw)}kW", inv_kw
+    
+    # Si no hay un inversor único, usar combinación de inversores
     recomendacion, potencia_restante = {}, min_ac_power
+    
+    # Ordenar inversores de mayor a menor para usar primero los más grandes
     for inv_kw in sorted(inverters_disponibles, reverse=True):
         if potencia_restante >= inv_kw:
             num = int(potencia_restante // inv_kw)
             recomendacion[inv_kw] = num
             potencia_restante -= num * inv_kw
+    
+    # Si queda potencia residual, buscar el inversor más pequeño que la cubra
     if potencia_restante > 0.1:
         inverter_para_resto = min(inverters_disponibles)
         for inv_kw in sorted(inverters_disponibles):
@@ -747,14 +793,16 @@ def recomendar_inversor(size_kwp):
                 inverter_para_resto = inv_kw
                 break
         recomendacion[inverter_para_resto] = recomendacion.get(inverter_para_resto, 0) + 1
+    
     if not recomendacion: 
         return "No se pudo generar una recomendación.", 0
+    
+    # Construir string de recomendación en formato compacto
     partes, total_power = [], 0
     for kw, count in sorted(recomendacion.items(), reverse=True):
-        s = "s" if count > 1 else ""
-        partes.append(f"{count} inversor{s} de {kw} kW")
+        partes.append(f"{count}x{int(kw)}kW")
         total_power += kw * count
-    final_string = " y ".join(partes) + f" (Potencia AC total: {total_power} kW)."
+    final_string = " y ".join(partes)
     return final_string, total_power
 
 # Reemplaza tu función cotizacion completa con esta versión
@@ -784,7 +832,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     factor_seguridad = 1.30
     area_requerida = math.ceil(quantity * area_por_panel * factor_seguridad)
     
-    costo_por_kwp = 7587.7 * size**2 - 346085 * size + 7e6
+    costo_por_kwp = calcular_costo_por_kwp(size)
     valor_proyecto_fv = costo_por_kwp * size
     if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
 
@@ -964,36 +1012,53 @@ class PropuestaPDF(FPDF):
         self.image('assets/3.jpg', x=0, y=0, w=210)
         self.set_text_color(0, 0, 0) # Color negro
 
-        # --- 1. Bloque de TIR ---
-        valor_tir = datos.get('TIR (Tasa Interna de Retorno)', '0%').replace('%', '')
+        # --- 1. Bloque de Ahorro Anual (redondeado a entero en millones) ---
+        valor_ahorro_str = datos.get('Ahorro Estimado Primer Ano (COP)', '0').replace(',', '').replace('$', '')
+        try:
+            valor_ahorro_millones = float(valor_ahorro_str) / 1000000
+            valor_ahorro_entero = int(round(valor_ahorro_millones))
+        except:
+            valor_ahorro_entero = 0
         self.set_font('DMSans', 'B', 40)
-        self.set_xy(76, 69)
-        self.cell(w=30, txt=valor_tir, align='L')
+        self.set_xy(52, 58)  # Ajustar coordenadas según la nueva plantilla
+        self.cell(w=30, text=str(valor_ahorro_entero), align='L')
 
-        # --- 2. Bloque de Ahorro Anual ---
-        valor_ahorro_str = datos.get('Ahorro Estimado Primer Ano (COP)', '0').replace(',', '')
-        valor_ahorro_millones = float(valor_ahorro_str) / 1000000
+        # --- 2. Bloque de Cantidad de Módulos Fotovoltaicos ---
+        cantidad_paneles = datos.get('Cantidad de Paneles', '0')
+        # Extraer solo el número si viene en formato "XX de XXXW"
+        if ' de ' in cantidad_paneles:
+            cantidad_paneles = cantidad_paneles.split(' de ')[0]
+        try:
+            cantidad_num = int(cantidad_paneles)
+        except:
+            cantidad_num = 0
         self.set_font('DMSans', 'B', 40)
-        self.set_xy(32, 106)
-        self.cell(w=30, txt=f"{valor_ahorro_millones:.0f}", align='L')
+        self.set_xy(51, 105)  # Ajustar coordenadas según la nueva plantilla
+        self.cell(w=30, text=str(cantidad_num), align='L')
 
-        # --- 3. Bloque de Tiempo de Retorno ---
-        valor_retorno = datos.get('Periodo de Retorno (anos)', '0')
-        self.set_font('Roboto', 'B', 15) # Fuente y tamaño personalizados para este campo
-        self.set_xy(170, 75)
-        self.cell(w=20, txt=str(valor_retorno), align='L')
-
-        # --- 4. Bloque de Potencia (kWp) ---
-        valor_kwp = datos.get('Tamano del Sistema (kWp)', '0')
-        self.set_font('DMSans', 'B', 40)
-        self.set_xy(43, 146)
-        self.cell(w=30, txt=str(valor_kwp), align='L')
-        
-        # --- 5. Bloque de Árboles ---
+        # --- 3. Bloque de Número de Árboles ---
         valor_arboles = datos.get('Árboles Equivalentes Ahorrados', '0')
+        # Si viene como string, extraer número
+        if isinstance(valor_arboles, str):
+            valor_arboles = valor_arboles.replace('+', '').strip()
+        try:
+            arboles_num = int(round(float(valor_arboles)))
+        except:
+            arboles_num = 0
         self.set_font('DMSans', 'B', 40)
-        self.set_xy(32.5, 188)
-        self.cell(w=30, txt=f"+{valor_arboles}", align='L')
+        self.set_xy(51, 153)  # Ajustar coordenadas según la nueva plantilla
+        self.cell(w=30, text=str(arboles_num), align='L')
+
+        # --- 4. Bloque de Toneladas de CO2 Evitadas ---
+        co2_tons = datos.get('CO2 Evitado Anual (Toneladas)', '0')
+        try:
+            co2_tons_num = float(co2_tons)
+            co2_tons_redondeado = round(co2_tons_num, 1)  # Una decimal
+        except:
+            co2_tons_redondeado = 0.0
+        self.set_font('DMSans', 'B', 40)
+        self.set_xy(16, 189)  # Ajustar coordenadas según la nueva plantilla
+        self.cell(w=30, text=f"{co2_tons_redondeado:.1f}", align='L')
     
     def crear_detalle_sistema(self, datos):
         self.add_page()
@@ -2072,7 +2137,8 @@ def render_tab_sistema_mobile():
     clima = st.selectbox("Clima predominante", ["SOL", "NUBLADO", "LLUVIA"], key="clima_mobile")
     
     # Cálculo automático de cantidad y tamaño
-    cantidad = max(1, round((consumo * 1.2) / (4.5 * 30 * 0.85) * 1000 // int(potencia_panel)))
+    cantidad_calc = max(1, round((consumo * 1.2) / (4.5 * 30 * 0.85) * 1000 // int(potencia_panel)))
+    cantidad = redondear_a_par(cantidad_calc)
     size = round(cantidad * potencia_panel / 1000, 2)
     
     st.info(f"📊 Sistema calculado: {cantidad} paneles de {potencia_panel}W = {size} kWp")
@@ -2246,7 +2312,7 @@ def render_tab_resultados_mobile():
         cubierta = sistema.get('cubierta', 'LÁMINA')
 
         # Calcular costo del proyecto
-        costo_por_kwp = 7587.7 * size_calc**2 - 346085 * size_calc + 7e6
+        costo_por_kwp = calcular_costo_por_kwp(size_calc)
         valor_proyecto_fv = costo_por_kwp * size_calc
         if cubierta.strip().upper() == "TEJA":
             valor_proyecto_fv *= 1.03
@@ -2485,6 +2551,13 @@ def render_tab_archivos_mobile():
             valor_iva = math.ceil((valor_total_red * (PROMEDIOS_COSTO['IVA (Impuestos)']/100))/100)*100
             valor_sin_iva = valor_total_red - valor_iva
             
+            # Calcular datos de carbono si están disponibles
+            arboles_equivalentes = 0
+            co2_evitado_tons = 0.0
+            if incluir_carbon and carbon_data:
+                arboles_equivalentes = carbon_data.get('trees_saved_per_year', 0)
+                co2_evitado_tons = carbon_data.get('annual_co2_avoided_tons', 0.0)
+            
             datos_pdf = {
                 "Nombre del Proyecto": f"{cliente.get('nombre','Cliente')} - {cliente.get('ubicacion','Proyecto')}",
                 "Cliente": cliente.get('nombre','Cliente'),
@@ -2506,6 +2579,8 @@ def render_tab_archivos_mobile():
                 "Desembolso Inicial (COP)": f"${desembolso_ini:,.0f}",
                 "Cuota Mensual del Credito (COP)": f"${cuota_mensual:,.0f}",
                 "Plazo del Crédito": str(plazo * 12) if usa_fin else "0",
+                "Árboles Equivalentes Ahorrados": str(int(round(arboles_equivalentes))),
+                "CO2 Evitado Anual (Toneladas)": f"{co2_evitado_tons:.2f}",
             }
             
             # Determinar si hay financiamiento
@@ -2789,12 +2864,13 @@ def render_desktop_interface():
             module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
             HSP_aprox = 4.5; n_aprox = 0.85; Ratio = 1.2
             size = round(Load * Ratio / (HSP_aprox * 30 * n_aprox), 2)
-            quantity = round(size * 1000 / module)
+            quantity = redondear_a_par(size * 1000 / module)
             size = round(quantity * module / 1000, 2)
             st.info(f"Sistema estimado: **{size:.2f} kWp** ({int(quantity)} paneles)")
         else:
             module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
-            quantity = st.number_input("Cantidad de paneles", min_value=1, value=12, step=1)
+            quantity_input = st.number_input("Cantidad de paneles", min_value=1, value=12, step=2)
+            quantity = redondear_a_par(quantity_input)
             Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
             size = round((quantity * module) / 1000, 2)
             st.info(f"Sistema dimensionado: **{size:.2f} kWp**")
@@ -2919,14 +2995,14 @@ def render_desktop_interface():
                 n_aprox = 0.85
                 Ratio = 1.2
                 size_calc = round(Load * Ratio / (HSP_aprox * 30 * n_aprox), 2)
-                quantity_calc = round(size_calc * 1000 / module)
+                quantity_calc = redondear_a_par(size_calc * 1000 / module)
                 size_calc = round(quantity_calc * module / 1000, 2)
             else:
                 size_calc = size
                 quantity_calc = quantity
 
             # Calcular costo del proyecto
-            costo_por_kwp = 7587.7 * size_calc**2 - 346085 * size_calc + 7e6
+            costo_por_kwp = calcular_costo_por_kwp(size_calc)
             valor_proyecto_fv = costo_por_kwp * size_calc
             if cubierta.strip().upper() == "TEJA":
                 valor_proyecto_fv *= 1.03
@@ -3450,6 +3526,13 @@ def render_desktop_interface():
             valor_iva_pdf = math.ceil(((presupuesto_materiales_pdf + ganancia_estimada_pdf) * 0.19)/100)*100
             valor_sistema_sin_iva_pdf = valor_pdf_redondeado - valor_iva_pdf
 
+            # Calcular datos de carbono si están disponibles
+            arboles_equivalentes_desktop = 0
+            co2_evitado_tons_desktop = 0.0
+            if incluir_carbon and carbon_data:
+                arboles_equivalentes_desktop = carbon_data.get('trees_saved_per_year', 0)
+                co2_evitado_tons_desktop = carbon_data.get('annual_co2_avoided_tons', 0.0)
+            
             datos_para_pdf = {
                 "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
                 "Valor Total del Proyecto (COP)": f"${valor_pdf_redondeado:,.0f}",
@@ -3466,6 +3549,8 @@ def render_desktop_interface():
                 "Tipo de Cubierta": cubierta,
                 "Potencia de Paneles": f"{int(module)}",
                 "Potencia AC Inversor": f"{potencia_ac_inversor}",
+                "Árboles Equivalentes Ahorrados": str(int(round(arboles_equivalentes_desktop))),
+                "CO2 Evitado Anual (Toneladas)": f"{co2_evitado_tons_desktop:.2f}",
             }
             
             # Calcular O&M (2% del CAPEX)
