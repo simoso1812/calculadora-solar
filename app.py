@@ -759,53 +759,168 @@ def redondear_a_par(numero):
     else:
         return numero_int + 1
 
+def calcular_margen_inversor(size_kwp):
+    """
+    Calcula el margen aceptable para el inversor basado en el tamaño del sistema.
+    Sistemas más grandes permiten mayor margen (menor relación inversor/DC).
+    
+    Args:
+        size_kwp: Tamaño del sistema en kWp
+        
+    Returns:
+        float: Margen máximo permitido (0.2 a 0.35)
+    """
+    if size_kwp < 20:
+        return 0.2  # 20% margin (80% minimum)
+    elif size_kwp < 50:
+        return 0.25  # 25% margin (75% minimum)
+    elif size_kwp < 100:
+        return 0.30  # 30% margin (70% minimum)
+    else:
+        return 0.35  # 35% margin (65% minimum) for very large systems
+
 def recomendar_inversor(size_kwp):
     """
-    Recomienda inversores basándose en la potencia del sistema.
-    Prioriza usar inversores individuales cuando sea posible.
+    Recomienda la combinación de inversores ÓPTIMA para maximizar la potencia AC,
+    respetando las reglas de diseño para diferentes tamaños de sistema.
     """
     inverters_disponibles = [3, 5, 6, 8, 10, 20, 30, 40, 50, 100]
-    min_ac_power = size_kwp / 1.2
     
-    # Primero intentar encontrar un inversor único que pueda manejar todo el sistema
-    # Buscar desde el más grande hacia el más pequeño
-    for inv_kw in sorted(inverters_disponibles, reverse=True):
-        if inv_kw >= min_ac_power:
-            # Verificar si este inversor único es suficiente (con margen razonable)
-            if inv_kw >= size_kwp * 0.8:  # Permite hasta 20% menos que el tamaño
-                return f"1x{int(inv_kw)}kW", inv_kw
+    if size_kwp <= 0:
+        return "Potencia del sistema no válida.", 0
     
-    # Si no hay un inversor único, usar combinación de inversores
-    recomendacion, potencia_restante = {}, min_ac_power
+    margen = calcular_margen_inversor(size_kwp)
+    min_power = size_kwp * (1 - margen)
+    max_power = int(math.floor(size_kwp))
     
-    # Ordenar inversores de mayor a menor para usar primero los más grandes
-    for inv_kw in sorted(inverters_disponibles, reverse=True):
-        if potencia_restante >= inv_kw:
-            num = int(potencia_restante // inv_kw)
-            recomendacion[inv_kw] = num
-            potencia_restante -= num * inv_kw
-    
-    # Si queda potencia residual, buscar el inversor más pequeño que la cubra
-    if potencia_restante > 0.1:
-        inverter_para_resto = min(inverters_disponibles)
-        for inv_kw in sorted(inverters_disponibles):
-            if inv_kw >= potencia_restante: 
-                inverter_para_resto = inv_kw
-                break
-        recomendacion[inverter_para_resto] = recomendacion.get(inverter_para_resto, 0) + 1
-    
-    if not recomendacion: 
-        return "No se pudo generar una recomendación.", 0
-    
-    # Construir string de recomendación en formato compacto
-    partes, total_power = [], 0
-    for kw, count in sorted(recomendacion.items(), reverse=True):
-        partes.append(f"{count}x{int(kw)}kW")
-        total_power += kw * count
-    final_string = " y ".join(partes)
-    return final_string, total_power
+    if max_power <= 0:
+        return "Potencia del sistema demasiado baja para recomendar inversor.", 0
 
-# Reemplaza tu función cotizacion completa con esta versión
+    best_combo_details = {'combo': None, 'total_power': 0}
+
+    # 1. Evaluar inversores únicos
+    for inv in inverters_disponibles:
+        if min_power <= inv <= max_power:
+            if inv > best_combo_details['total_power']:
+                best_combo_details['combo'] = {inv: 1}
+                best_combo_details['total_power'] = inv
+
+    # 2. Evaluar combinaciones según el tamaño del sistema
+    if size_kwp < 20:
+        # Lógica de programación dinámica para sistemas pequeños
+        disponibles = [inv for inv in inverters_disponibles if inv <= max_power]
+        if disponibles:
+            dp = {0: {}}
+            for inv in disponibles:
+                for total, combo in list(dp.items()):
+                    new_total = total + inv
+                    if new_total <= max_power:
+                        if new_total not in dp or sum(dp[new_total].values()) > sum(combo.values()) + 1:
+                            new_combo = combo.copy()
+                            new_combo[inv] = new_combo.get(inv, 0) + 1
+                            dp[new_total] = new_combo
+            
+            # Buscar la mejor combinación en DP que cumpla el margen
+            for total in range(max_power, int(min_power) - 1, -1):
+                if total in dp and total > best_combo_details['total_power']:
+                    best_combo_details['combo'] = dp[total]
+                    best_combo_details['total_power'] = total
+                    break # Encontramos la mejor posible
+    
+    elif size_kwp < 100:
+        # Lógica para sistemas medianos (máx 2 inversores >= 20kW)
+        disponibles = [inv for inv in inverters_disponibles if inv >= 20 and inv <= max_power]
+        for i, inv1 in enumerate(disponibles):
+            for inv2 in disponibles[i:]:
+                total = inv1 + inv2
+                if min_power <= total <= max_power and total > best_combo_details['total_power']:
+                    best_combo_details['total_power'] = total
+                    best_combo_details['combo'] = {inv1: 0, inv2: 0}
+                    best_combo_details['combo'][inv1] += 1
+                    best_combo_details['combo'][inv2] += 1
+
+    else: # size_kwp >= 100
+        # Lógica para sistemas grandes (máx 3 inversores, secundarios >= 25% del total)
+        min_secondary = max(20, size_kwp * 0.25)
+        disponibles = [inv for inv in inverters_disponibles if inv >= min_secondary and inv <= max_power]
+        
+        # Combinaciones de 2
+        for i, inv1 in enumerate(disponibles):
+            for inv2 in disponibles[i:]:
+                total = inv1 + inv2
+                if min_power <= total <= max_power and total > best_combo_details['total_power']:
+                    best_combo_details['total_power'] = total
+                    best_combo_details['combo'] = {inv1: 0, inv2: 0}
+                    best_combo_details['combo'][inv1] += 1
+                    best_combo_details['combo'][inv2] += 1
+
+        # Combinaciones de 3
+        for i, inv1 in enumerate(disponibles):
+            for j, inv2 in enumerate(disponibles[i:]):
+                for inv3 in disponibles[j:]:
+                    total = inv1 + inv2 + inv3
+                    if min_power <= total <= max_power and total > best_combo_details['total_power']:
+                        best_combo_details['total_power'] = total
+                        best_combo_details['combo'] = {inv1: 0, inv2: 0, inv3: 0}
+                        best_combo_details['combo'][inv1] += 1
+                        best_combo_details['combo'][inv2] += 1
+                        best_combo_details['combo'][inv3] += 1
+
+    # 3. Formatear y devolver la mejor opción encontrada
+    if not best_combo_details['combo']:
+        # Fallback si no se encontró ninguna combinación adecuada
+        disponibles = [inv for inv in inverters_disponibles if inv <= max_power]
+        if not disponibles:
+            return "No hay inversores disponibles.", 0
+        
+        # Devolver el inversor individual más grande posible como último recurso
+        best_single = max(disponibles)
+        return f"1x{int(best_single)}kW", best_single
+
+    partes = []
+    # Ordenar por tamaño de inversor para un formato consistente
+    for kw, count in sorted(best_combo_details['combo'].items(), reverse=True):
+        if count > 0:
+            partes.append(f"{count}x{int(kw)}kW")
+            
+    return " + ".join(partes), best_combo_details['total_power']
+
+
+def calcular_performance_ratio(clima, cubierta):
+    """
+    Calcula el Performance Ratio (PR) del sistema basado en el clima y tipo de cubierta.
+    """
+    PR_BASE = 0.85  # Nuevo PR base más optimista
+
+    # Ajuste por clima
+    clima_upper = clima.strip().upper()
+    if clima_upper == "NUBE":
+        PR_BASE -= 0.05  # -5% por clima nublado
+    elif clima_upper == "SOL":
+        PR_BASE -= 0.02  # -2% por calor excesivo
+
+    # Ajuste por tipo de cubierta
+    cubierta_upper = cubierta.strip().upper()
+    if cubierta_upper == "TEJA":
+        PR_BASE -= 0.01  # -1% por complejidad de teja
+
+    return round(PR_BASE, 3)
+
+def calcular_factor_clipping(dc_ac_ratio):
+    """
+    Estima el porcentaje de pérdida de energía anual debido al clipping
+    basado en el DC/AC ratio. Es una aproximación empírica.
+    """
+    if dc_ac_ratio <= 1.05:
+        return 0.0  # Pérdida insignificante
+    elif dc_ac_ratio <= 1.15:
+        return 0.005 # 0.5% de pérdida
+    elif dc_ac_ratio <= 1.25:
+        return 0.015 # 1.5% de pérdida
+    elif dc_ac_ratio <= 1.35:
+        return 0.03  # 3.0% de pérdida
+    else:
+        return 0.05  # >35% de sobrecarga, cap a 5% de pérdida
 
 # Reemplaza tu función cotizacion completa con esta versión final
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
@@ -821,12 +936,15 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     # Se asegura de tener la lista de HSP mensuales para el cálculo
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
     
-    n = 0.8
     life = horizonte_tiempo
-    if clima.strip().upper() == "NUBE": n -= 0.05
+    n = calcular_performance_ratio(clima, cubierta)
     
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
-    potencia_efectiva_calculo = min(size, potencia_ac_inversor)
+    
+    # --- Nueva Lógica de Clipping ---
+    dc_ac_ratio = size / potencia_ac_inversor if potencia_ac_inversor > 0 else 1.0
+    factor_clipping = calcular_factor_clipping(dc_ac_ratio)
+    # --- Fin Nueva Lógica ---
     
     area_por_panel = 2.3 * 1.0
     factor_seguridad = 1.30
@@ -870,7 +988,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
     # Se calcula la generación de cada mes individualmente usando los HSP mensuales
-    monthly_generation_init = [potencia_efectiva_calculo * hsp * dias * n for hsp, dias in zip(hsp_mensual, dias_por_mes)]
+    monthly_generation_init = [(size * hsp * dias * n) * (1 - factor_clipping) for hsp, dias in zip(hsp_mensual, dias_por_mes)]
     
     for i in range(life):
         current_monthly_generation = [gen * ((1 - tasa_degradacion) ** i) for gen in monthly_generation_init]
