@@ -2188,25 +2188,40 @@ def render_tab_ubicacion_mobile():
     
     # Búsqueda opcional si hay API key
     gmaps = None
-    try:
-        gmaps = googlemaps.Client(key=os.environ.get("Maps_API_KEY"))
-    except Exception:
-        pass
+    maps_api_key = os.environ.get("Maps_API_KEY")
+    if maps_api_key:
+        try:
+            gmaps = googlemaps.Client(key=maps_api_key)
+        except Exception as e:
+            st.warning(f"No se pudo inicializar el cliente de Google Maps: {e}")
+    else:
+        st.info("Configura la variable Maps_API_KEY para habilitar la búsqueda de direcciones.")
     
     address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search_mobile")
-    if st.button("🔎 Buscar Dirección", key="buscar_dir_mobile") and address and gmaps:
-        with st.spinner("Buscando dirección..."):
-            res = gmaps.geocode(address, region='CO')
-            if res:
-                loc = res[0]['geometry']['location']
-                coords = [loc['lat'], loc['lng']]
-                st.session_state.map_state = st.session_state.get('map_state', {"center":[4.5709,-74.2973],"zoom":6,"marker":None})
-                st.session_state.map_state["marker"] = coords
-                st.session_state.map_state["center"] = coords
-                st.session_state.map_state["zoom"] = 16
-                st.rerun()
-            else:
-                st.warning("Dirección no encontrada.")
+    address = address.strip()
+    if st.button("🔎 Buscar Dirección", key="buscar_dir_mobile"):
+        if not address:
+            st.warning("Ingresa una dirección antes de buscar.")
+        elif not gmaps:
+            st.warning("La búsqueda no está disponible. Revisa la configuración de la API de Google Maps.")
+        else:
+            try:
+                with st.spinner("Buscando dirección..."):
+                    res = gmaps.geocode(address, region='CO')
+                if res:
+                    loc = res[0]['geometry']['location']
+                    coords = [loc['lat'], loc['lng']]
+                    st.session_state.map_state = st.session_state.get('map_state', {"center":[4.5709,-74.2973],"zoom":6,"marker":None})
+                    st.session_state.map_state["marker"] = coords
+                    st.session_state.map_state["center"] = coords
+                    st.session_state.map_state["zoom"] = 16
+                    st.rerun()
+                else:
+                    st.warning("Dirección no encontrada.")
+            except googlemaps.exceptions.ApiError as api_error:
+                st.error(f"Google Maps rechazó la solicitud ({api_error}). Verifica la dirección y los permisos del API Key.")
+            except Exception as e:
+                st.error(f"Error inesperado consultando Google Maps: {e}")
     
     # Estado de mapa
     if "map_state" not in st.session_state:
@@ -2894,16 +2909,26 @@ def render_desktop_interface():
         
         st.subheader("Ubicación Geográfica")
         gmaps = None
-        try:
-            gmaps = googlemaps.Client(key=os.environ.get("Maps_API_KEY"))
-        except Exception as e:
-            st.warning(f"API Key de Google Maps no configurada o inválida. La búsqueda está desactivada. Error: {e}")
+        maps_api_key = os.environ.get("Maps_API_KEY")
+        if maps_api_key:
+            try:
+                gmaps = googlemaps.Client(key=maps_api_key)
+            except Exception as e:
+                st.warning(f"No se pudo inicializar el cliente de Google Maps: {e}")
+        else:
+            st.warning("Variable de entorno Maps_API_KEY no configurada. La búsqueda está desactivada.")
 
         address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
+        address = address.strip()
         if st.button("Buscar Dirección"):
-            if address and gmaps:
-                with st.spinner("Buscando dirección..."):
-                    geocode_result = gmaps.geocode(address, region='CO')
+            if not address:
+                st.warning("Por favor, ingresa una dirección para buscar.")
+            elif not gmaps:
+                st.warning("La búsqueda está desactivada porque no se pudo inicializar Google Maps.")
+            else:
+                try:
+                    with st.spinner("Buscando dirección..."):
+                        geocode_result = gmaps.geocode(address, region='CO')
                     if geocode_result:
                         location = geocode_result[0]['geometry']['location']
                         coords = [location['lat'], location['lng']]
@@ -2913,8 +2938,10 @@ def render_desktop_interface():
                         st.rerun()
                     else:
                         st.error("Dirección no encontrada.")
-            elif not address:
-                st.warning("Por favor, ingresa una dirección para buscar.")
+                except googlemaps.exceptions.ApiError as api_error:
+                    st.error(f"Google Maps rechazó la solicitud ({api_error}). Revisa que la dirección esté completa y que la API Key tenga acceso al servicio de Geocoding.")
+                except Exception as e:
+                    st.error(f"Error inesperado consultando Google Maps: {e}")
 
         if "map_state" not in st.session_state:
             st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
