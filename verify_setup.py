@@ -7,6 +7,8 @@ Run this to test your OAuth credentials and Google Drive integration
 import os
 import sys
 from pathlib import Path
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 
 def check_env_file():
     """Check if .env file exists and has required variables"""
@@ -37,39 +39,19 @@ def check_env_file():
     print("[OK] All required environment variables are set")
     return True
 
-def test_google_sheets():
-    """Test Google Sheets integration"""
-    print("\n[CHECK] Testing Google Sheets integration...")
-
-    try:
-        from project_manager import project_manager
-
-        if project_manager.service is None:
-            print("[ERROR] Google Sheets service not available")
-            print("   Check your OAuth credentials in .env file")
-            return False
-
-        # Try to list projects (will be empty initially)
-        projects = project_manager.list_projects()
-        print("[OK] Google Sheets connected successfully")
-        print(f"   Found {len(projects)} existing projects")
-
-        return True
-
-    except Exception as e:
-        print(f"[ERROR] Google Sheets test failed: {e}")
-        return False
-
 def test_google_drive():
-    """Test Google Drive integration"""
+    """Test Google Drive integration using the new structure"""
     print("\n[CHECK] Testing Google Drive integration...")
 
     try:
-        from project_manager import project_manager
-
-        if project_manager.drive_service is None:
-            print("[ERROR] Google Drive service not available")
-            return False
+        creds = Credentials(
+            None, refresh_token=os.environ.get("GOOGLE_REFRESH_TOKEN"),
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id=os.environ.get("GOOGLE_CLIENT_ID"), 
+            client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+            scopes=['https://www.googleapis.com/auth/drive']
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
 
         # Check if parent folder exists
         parent_folder_id = os.environ.get('PARENT_FOLDER_ID')
@@ -79,7 +61,7 @@ def test_google_drive():
             return True
 
         # Try to get folder info
-        folder = project_manager.drive_service.files().get(
+        folder = drive_service.files().get(
             fileId=parent_folder_id,
             fields='name, id'
         ).execute()
@@ -92,26 +74,7 @@ def test_google_drive():
         print(f"[WARNING] Cannot access parent folder: {e}")
         print("   This is normal if the folder was created with different OAuth credentials")
         print("   The app will work with limited Google Drive functionality")
-        print("   You can still save/load projects and generate financial summaries")
         return True  # Return True since the service works, just not the folder
-
-def test_financial_summary():
-    """Test financial summary generator"""
-    print("\n[CHECK] Testing financial summary generator...")
-
-    try:
-        from financial_summary import financial_summary_generator
-
-        if financial_summary_generator is None:
-            print("[ERROR] Financial summary generator not available")
-            return False
-
-        print("[OK] Financial summary generator loaded successfully")
-        return True
-
-    except Exception as e:
-        print(f"[ERROR] Financial summary test failed: {e}")
-        return False
 
 def main():
     """Run all verification tests"""
@@ -124,9 +87,7 @@ def main():
 
     tests = [
         ("Environment Variables", check_env_file),
-        ("Google Sheets API", test_google_sheets),
         ("Google Drive API", test_google_drive),
-        ("Financial Summary", test_financial_summary)
     ]
 
     passed = 0
