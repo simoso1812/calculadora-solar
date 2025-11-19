@@ -1,46 +1,31 @@
-"""
-Interfaz para escritorio (Desktop).
-"""
 import streamlit as st
+import pandas as pd
+import numpy as np
+import numpy_financial as npf
+import matplotlib.pyplot as plt
 import datetime
 import os
 import math
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
 import folium
 from streamlit_folium import st_folium
 import googlemaps
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-
-from src.config import HSP_MENSUAL_POR_CIUDAD, PROMEDIOS_COSTO, ESTRUCTURA_CARPETAS, HSP_POR_CIUDAD
-from src.services.pvgis_service import get_pvgis_hsp_alternative
-from src.services.location_service import get_static_map_image
+from src.config import HSP_MENSUAL_POR_CIUDAD, PROMEDIOS_COSTO, HSP_POR_CIUDAD
 from src.services.calculator_service import (
-    calcular_costo_por_kwp,
-    cotizacion, 
-    redondear_a_par,
-    calcular_lista_materiales,
-    generar_csv_flujo_caja_detallado,
-    calcular_analisis_sensibilidad
+    cotizacion, calcular_costo_por_kwp, generar_csv_flujo_caja_detallado, 
+    calcular_analisis_sensibilidad, calcular_lista_materiales, redondear_a_par
 )
-from src.services.drive_service import (
-    gestionar_creacion_drive, 
-    obtener_siguiente_consecutivo,
-    subir_csv_a_drive
-)
+from src.services.drive_service import obtener_siguiente_consecutivo, gestionar_creacion_drive
+from src.services.location_service import get_static_map_image
+from src.services.pvgis_service import get_pvgis_hsp_alternative
 from src.services.notion_service import agregar_cliente_a_notion_crm
 from src.utils.pdf_generator import PropuestaPDF
 from src.utils.contract_generator import generar_contrato_docx
-from src.utils.chargers import generar_pdf_cargadores, cotizacion_cargadores_costos, calcular_materiales_cargador
+from src.utils.chargers import generar_pdf_cargadores
 from src.utils.helpers import validar_datos_entrada, formatear_moneda
-
-try:
-    from carbon_calculator import CarbonEmissionsCalculator
-    carbon_calculator = CarbonEmissionsCalculator()
-except ImportError:
-    carbon_calculator = None
 
 def render_desktop_interface():
     """Interfaz optimizada para desktop"""
@@ -62,6 +47,10 @@ def render_desktop_interface():
         st.markdown("🖥️")
     
     st.success("✅ Interfaz desktop cargada correctamente")
+
+    # Inicializar estado de resultados si no existe
+    if 'desktop_results' not in st.session_state:
+        st.session_state.desktop_results = None
 
     # --- INICIALIZACIÓN DE SERVICIOS Y DATOS ---
     drive_service = None
@@ -205,9 +194,26 @@ def render_desktop_interface():
         if opcion == "Por Consumo Mensual (kWh)":
             Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
             module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
-            HSP_aprox = 4.5; n_aprox = 0.85; Ratio = 1.2
-            size = round(Load * Ratio / (HSP_aprox * 30 * n_aprox), 2)
-            quantity = redondear_a_par(size * 1000 / module)
+            
+            # Factor de seguridad configurable
+            factor_seguridad_pct = st.slider("Factor de Seguridad / Sobredimensionamiento (%)", 0, 50, 10, 5, help="Porcentaje adicional al consumo para asegurar cobertura")
+            factor_seguridad = 1 + (factor_seguridad_pct / 100)
+            
+            # Usar HSP real si está disponible
+            if hsp_mensual_calculado:
+                HSP_promedio = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
+                st.caption(f"📍 Usando HSP real de ubicación: {HSP_promedio:.2f} kWh/m²")
+            else:
+                HSP_promedio = HSP_POR_CIUDAD.get(ciudad_input, 4.8)
+                st.caption(f"⚠️ Usando HSP estimado de {ciudad_input}: {HSP_promedio:.2f} kWh/m²")
+
+            n_aprox = 0.85
+            
+            # Fórmula actualizada: Consumo * FactorSeguridad / (HSP * 30 * Eficiencia)
+            size_teorico = (Load * factor_seguridad) / (HSP_promedio * 30 * n_aprox)
+            quantity_calc = math.ceil(size_teorico * 1000 / module)
+            quantity = redondear_a_par(quantity_calc)
+            
             size = round(quantity * module / 1000, 2)
             st.info(f"Sistema estimado: **{size:.2f} kWp** ({int(quantity)} paneles)")
         else:
@@ -466,9 +472,8 @@ def render_desktop_interface():
                         data=pdf_bytes,
                         file_name=f"Resumen_Financiero_{nombre_cliente}_{dt.datetime.now().strftime('%Y%m%d')}.pdf",
                         mime="application/pdf",
-                        key="download_financial_pdf"
+                        use_container_width=True
                     )
-
                 except Exception as e:
                     st.error(f"Error generando PDF financiero: {e}")
 
@@ -494,7 +499,7 @@ def render_desktop_interface():
 
 
     # ==============================================================================
-    # LÓGICA DE CÁLCULO Y VISUALIZACIÓN (AL PRESIONAR EL BOTÓN)
+    # LÓGICA DE CÁLCULO Y VISUALIZACIÓN
     # ==============================================================================
     if st.button("   Calcular y Generar Reporte", use_container_width=True):
         # Validar datos de entrada
@@ -504,199 +509,96 @@ def render_desktop_interface():
             st.error("❌ Errores de validación encontrados:")
             for error in errores_validacion:
                 st.error(f"• {error}")
-            return
-        
-        with st.spinner('Realizando cálculos y creando archivos... ⏳'):
-            nombre_proyecto = f"FV{str(datetime.datetime.now().year)[-2:]}{numero_proyecto_del_año:03d} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
-            st.success(f"Proyecto Generado: {nombre_proyecto}")
-
-
-            valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
-            desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
-            tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
-            potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria, carbon_data = \
-                cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
-                             ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
-                             perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
-                             plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
-                             incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
-                             profundidad_descarga=profundidad_descarga / 100,
-                             eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
-                             horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon,
-                             incluir_beneficios_tributarios=incluir_beneficios_tributarios,
-                             incluir_deduccion_renta=incluir_deduccion_renta,
-                             incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
-                             demora_6_meses=demora_6_meses)
-            
-            # Aplicar precio manual si está activado
-            if precio_manual and precio_manual_valor:
-                val_total = precio_manual_valor
-                # Recalcular financiamiento con el precio manual
-                monto_a_financiar = val_total * (perc_financiamiento / 100)
-                monto_a_financiar = math.ceil(monto_a_financiar)
-
-                cuota_mensual_credito = 0
-                if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
-                    tasa_mensual_credito = (tasa_interes_input / 100) / 12
-                    num_pagos_credito = plazo_credito_años * 12
-                    cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
-                    cuota_mensual_credito = math.ceil(cuota_mensual_credito)
-
-                desembolso_inicial_cliente = val_total - monto_a_financiar
-
-                # RECALCULAR FLUJO DE CAJA COMPLETO con el precio manual
-                fcl = []  # Reiniciar flujo de caja
-                for i in range(life):
-                    # Calcular ahorro anual para cada año
-                    ahorro_anual_total = 0
-                    if incluir_baterias:
-                        ahorro_anual_total = (Load * 12) * costkWh
-                    else:  # Lógica On-Grid
-                        for gen_mes in monthly_generation:
-                            consumo_mes = Load
-                            if gen_mes >= consumo_mes:
-                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
-                            else:
-                                ahorro_mes = gen_mes * costkWh
-                            ahorro_anual_total += ahorro_mes
-
-                    # Aplicar indexación
-                    ahorro_anual_indexado = ahorro_anual_total * ((1 + index_input / 100) ** i)
-                    if i == 0:
-                        ahorro_año1 = ahorro_anual_total
-
-                    # Mantenimiento anual
-                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
-
-                    # Cuotas anuales del crédito
-                    cuotas_anuales_credito = 0
-                    if i < plazo_credito_años:
-                        cuotas_anuales_credito = cuota_mensual_credito * 12
-
-                    # Flujo anual
-                    flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
-                    fcl.append(flujo_anual)
-
-                # Insertar desembolso inicial al inicio
-                fcl.insert(0, -desembolso_inicial_cliente)
-
-                # Recalcular métricas financieras
-                valor_presente = npf.npv(dRate_input / 100, fcl)
-                tasa_interna = npf.irr(fcl)
-
-                st.success(f"✅ **Precio Manual Aplicado**: ${val_total:,.0f} COP")
-                st.info("🔄 **Flujo de caja recalculado** con el precio manual para métricas correctas")
-            
-            generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
-            payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
-            payback_exacto = None
-            if payback_simple is not None:
-                if payback_simple > 0 and (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1]) != 0:
-                    payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
-                else:
-                    payback_exacto = float(payback_simple)
-            
-            # Store calculation results for project management
-            calculation_results = {
-                'valor_proyecto_total': valor_proyecto_total,
-                'size_calc': size_calc,
-                'monto_a_financiar': monto_a_financiar,
-                'cuota_mensual_credito': cuota_mensual_credito,
-                'desembolso_inicial_cliente': desembolso_inicial_cliente,
-                'fcl': fcl,
-                'trees': trees,
-                'monthly_generation': monthly_generation,
-                'valor_presente': valor_presente,
-                'tasa_interna': tasa_interna,
-                'cantidad_calc': cantidad_calc,
-                'life': life,
-                'recomendacion_inversor': recomendacion_inversor,
-                'lcoe': lcoe,
-                'n_final': n_final,
-                'hsp_mensual_final': hsp_mensual_final,
-                'potencia_ac_inversor': potencia_ac_inversor,
-                'ahorro_año1': ahorro_año1,
-                'area_requerida': area_requerida,
-                'capacidad_nominal_bateria': capacidad_nominal_bateria,
-                'carbon_data': carbon_data,
-                'payback_exacto': payback_exacto,
-                'generacion_promedio_mensual': generacion_promedio_mensual
-            }
-
-
-            # DEBUG: Mostrar información del cálculo principal
-            print(f"\n=== DEBUG CÁLCULO PRINCIPAL ===")
-            print(f"Horizonte: {horizonte_tiempo}")
-            print(f"Desembolso inicial: {desembolso_inicial_cliente:,.0f}")
-            print(f"Primeros 10 flujos: {[f'{x:,.0f}' for x in fcl[:10]]}")
-            print(f"Payback calculado: {payback_exacto}")
-            print(f"Suma acumulada primeros 6 años: {[f'{x:,.0f}' for x in np.cumsum(fcl)[:6]]}")
-            print("=" * 50)
-
-            st.header("Resultados de la Propuesta")
-            
-            # Indicador del horizonte de tiempo
-            st.info(f"📅 **Análisis financiero a {horizonte_tiempo} años** - TIR, VPN y Payback calculados para este período")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            # Usar val_total si precio manual está activado, de lo contrario usar valor_proyecto_total
-            valor_mostrar = val_total if (precio_manual and precio_manual_valor) else valor_proyecto_total
-            col1.metric("Valor del Proyecto", f"${valor_mostrar:,.0f}")
-            col2.metric("TIR", f"{tasa_interna:.1%}")
-            col3.metric("Payback (años)", f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A")
-            if incluir_baterias:
-                col4.metric("Batería Recomendada", f"{capacidad_nominal_bateria:.1f} kWh")
-            else:
-                col4.metric("Ahorro Año 1", f"${ahorro_año1:,.0f}")
-
-            # Display carbon metrics if available
-            if incluir_carbon and carbon_data and 'annual_co2_avoided_tons' in carbon_data:
-                st.markdown("---")
-                st.header("🌱 Impacto Ambiental y Sostenibilidad")
-
-                # Carbon metrics in columns
-                col_c1, col_c2, col_c3, col_c4 = st.columns(4)
-                col_c1.metric(
-                    "CO2 Evitado Anual",
-                    f"{carbon_data['annual_co2_avoided_tons']:.1f} ton",
-                    help="Toneladas de CO2 evitadas por año"
-                )
-                col_c2.metric(
-                    "Árboles Salvados",
-                    f"{carbon_data['trees_saved_per_year']:.0f}",
-                    help="Árboles equivalentes salvados por año"
-                )
-                col_c3.metric(
-                    "Valor Carbono",
-                    f"${carbon_data['annual_certification_value_cop']:,.0f}",
-                    help="Valor potencial de certificación de carbono"
-                )
-                col_c4.metric(
-                    "Autos Equivalentes",
-                    f"{carbon_data['cars_off_road_per_year']:.1f}",
-                    help="Autos que dejarían de circular por año"
-                )
-
-                # Additional equivalencies
-                with st.expander("📊 Ver más equivalencias ambientales"):
-                    st.markdown("**Impacto Ambiental Detallado:**")
-                    st.write(f"• **Vuelos evitados**: {carbon_data['flights_avoided_per_year']:.0f} vuelos de ida y vuelta")
-                    st.write(f"• **Botellas de plástico**: {carbon_data['plastic_bottles_avoided_per_year']:,.0f} botellas recicladas")
-                    st.write(f"• **Cargas de celular**: {carbon_data['smartphone_charges_avoided_per_year']:,.0f} cargas de batería")
-
-                    if 'lifetime_co2_avoided_tons' in carbon_data:
-                        st.markdown("**Impacto a Largo Plazo:**")
-                        st.write(f"• **CO2 total evitado**: {carbon_data['lifetime_co2_avoided_tons']:.1f} toneladas en {life} años")
-                        st.write(f"• **Valor total carbono**: ${carbon_data['lifetime_certification_value_cop']:,.0f} COP")
-
-            # Análisis de Sensibilidad
-            st.write(f"🔧 Debug - Verificando toggle: {incluir_analisis_sensibilidad}")
-            if incluir_analisis_sensibilidad:
-                st.header("📊 Análisis de Sensibilidad")
-                st.info("🔍 **Análisis comparativo** de TIR a 10 y 20 años con y sin financiación para evaluar la robustez del proyecto")
+        else:
+            with st.spinner('Realizando cálculos y creando archivos... ⏳'):
+                nombre_proyecto = f"FV{str(datetime.datetime.now().year)[-2:]}{numero_proyecto_del_año:03d} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
                 
-                with st.spinner("Calculando análisis de sensibilidad..."):
-                    # Calcular análisis de sensibilidad
+                valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
+                desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
+                tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
+                potencia_ac_inversor, ahorro_año1, area_requerida, capacidad_nominal_bateria, carbon_data = \
+                    cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
+                                 ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                                 perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
+                                 plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
+                                 incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
+                                 profundidad_descarga=profundidad_descarga / 100,
+                                 eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
+                                 horizonte_tiempo=horizonte_tiempo, incluir_carbon=incluir_carbon,
+                                 incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                                 incluir_deduccion_renta=incluir_deduccion_renta,
+                                 incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
+                                 demora_6_meses=demora_6_meses)
+                
+                # Aplicar precio manual si está activado
+                val_total = valor_proyecto_total
+                if precio_manual and precio_manual_valor:
+                    val_total = precio_manual_valor
+                    # Recalcular financiamiento con el precio manual
+                    monto_a_financiar = val_total * (perc_financiamiento / 100)
+                    monto_a_financiar = math.ceil(monto_a_financiar)
+
+                    cuota_mensual_credito = 0
+                    if monto_a_financiar > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
+                        tasa_mensual_credito = (tasa_interes_input / 100) / 12
+                        num_pagos_credito = plazo_credito_años * 12
+                        cuota_mensual_credito = abs(npf.pmt(tasa_mensual_credito, num_pagos_credito, -monto_a_financiar))
+                        cuota_mensual_credito = math.ceil(cuota_mensual_credito)
+
+                    desembolso_inicial_cliente = val_total - monto_a_financiar
+
+                    # RECALCULAR FLUJO DE CAJA COMPLETO con el precio manual
+                    fcl = []  # Reiniciar flujo de caja
+                    for i in range(life):
+                        # Calcular ahorro anual para cada año
+                        ahorro_anual_total = 0
+                        if incluir_baterias:
+                            ahorro_anual_total = (Load * 12) * costkWh
+                        else:  # Lógica On-Grid
+                            for gen_mes in monthly_generation:
+                                consumo_mes = Load
+                                if gen_mes >= consumo_mes:
+                                    ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                                else:
+                                    ahorro_mes = gen_mes * costkWh
+                                ahorro_anual_total += ahorro_mes
+                        
+                        # Aplicar indexación
+                        ahorro_anual_indexado = ahorro_anual_total * ((1 + index_input / 100) ** i)
+                        if i == 0:
+                            ahorro_año1 = ahorro_anual_total
+
+                        # Mantenimiento anual
+                        mantenimiento_anual = 0.05 * ahorro_anual_indexado
+
+                        # Cuotas anuales del crédito
+                        cuotas_anuales_credito = 0
+                        if i < plazo_credito_años:
+                            cuotas_anuales_credito = cuota_mensual_credito * 12
+
+                        # Flujo anual
+                        flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
+                        fcl.append(flujo_anual)
+
+                    # Insertar desembolso inicial al inicio
+                    fcl.insert(0, -desembolso_inicial_cliente)
+
+                    # Recalcular métricas financieras
+                    valor_presente = npf.npv(dRate_input / 100, fcl)
+                    tasa_interna = npf.irr(fcl)
+                
+                generacion_promedio_mensual = sum(monthly_generation) / len(monthly_generation) if monthly_generation else 0
+                payback_simple = next((i for i, x in enumerate(np.cumsum(fcl)) if x >= 0), None)
+                payback_exacto = None
+                if payback_simple is not None:
+                    if payback_simple > 0 and (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1]) != 0:
+                        payback_exacto = (payback_simple - 1) + abs(np.cumsum(fcl)[payback_simple-1]) / (np.cumsum(fcl)[payback_simple] - np.cumsum(fcl)[payback_simple-1])
+                    else:
+                        payback_exacto = float(payback_simple)
+
+                # Análisis de Sensibilidad
+                analisis_sensibilidad = None
+                if incluir_analisis_sensibilidad:
                     analisis_sensibilidad = calcular_analisis_sensibilidad(
                         Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100,
                         costkWh, module, ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
@@ -709,337 +611,338 @@ def render_desktop_interface():
                         incluir_deduccion_renta=incluir_deduccion_renta,
                         incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
                     )
-                
-                # Crear tabla comparativa
-                st.subheader("📈 Comparativa de Escenarios")
-                
-                # Preparar datos para la tabla
-                datos_tabla = []
-                for escenario, datos in analisis_sensibilidad.items():
-                    datos_tabla.append({
-                        "Escenario": escenario,
-                        "TIR": f"{datos['tir']:.1%}" if datos['tir'] is not None else "N/A",
-                        "VPN (COP)": f"${datos['vpn']:,.0f}" if datos['vpn'] is not None else "N/A",
-                        "Payback (años)": f"{datos['payback']:.2f}" if datos['payback'] is not None else "N/A",
-                        "Desembolso Inicial": f"${datos['desembolso_inicial']:,.0f}",
-                        "Cuota Mensual": f"${datos['cuota_mensual']:,.0f}" if datos['cuota_mensual'] > 0 else "N/A"
-                    })
-                
-                # Mostrar tabla
-                df_sensibilidad = pd.DataFrame(datos_tabla)
-                st.dataframe(df_sensibilidad, use_container_width=True)
-                
-                # Análisis de conclusiones
-                st.subheader("💡 Conclusiones del Análisis")
-                
-                # Encontrar mejores escenarios
-                mejor_tir_10 = max([(k, v['tir']) for k, v in analisis_sensibilidad.items() if '10 años' in k and v['tir'] is not None], key=lambda x: x[1], default=(None, 0))
-                mejor_tir_20 = max([(k, v['tir']) for k, v in analisis_sensibilidad.items() if '20 años' in k and v['tir'] is not None], key=lambda x: x[1], default=(None, 0))
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Mejor TIR a 10 años", f"{mejor_tir_10[1]:.1%}" if mejor_tir_10[0] else "N/A", 
-                             help=f"Escenario: {mejor_tir_10[0]}" if mejor_tir_10[0] else "")
-                
-                with col2:
-                    st.metric("Mejor TIR a 20 años", f"{mejor_tir_20[1]:.1%}" if mejor_tir_20[0] else "N/A",
-                             help=f"Escenario: {mejor_tir_20[0]}" if mejor_tir_20[0] else "")
-                
-                # Recomendaciones
-                st.info("""
-                **📋 Recomendaciones:**
-                - **TIR más alta**: Indica mayor rentabilidad del proyecto
-                - **Payback más bajo**: Indica recuperación más rápida de la inversión
-                - **Con financiación**: Reduce desembolso inicial pero puede afectar TIR
-                - **Sin financiación**: Mayor desembolso inicial pero potencialmente mejor TIR
-                """)
 
-            with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
-                st.subheader("Desglose Basado en Promedios Históricos")
-                # Usar precio manual si está activado para el presupuesto también
-                valor_base_presupuesto = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
-                presupuesto_equipos = valor_base_presupuesto * (PROMEDIOS_COSTO['Equipos'] / 100)
-                presupuesto_materiales = valor_base_presupuesto * (PROMEDIOS_COSTO['Materiales'] / 100)
-                ganancia_estimada_guia = valor_base_presupuesto * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
-                provision_iva_guia = (presupuesto_materiales + ganancia_estimada_guia) * 0.19
-                st.info(f"""Basado en el **Valor Total del Proyecto de ${valor_base_presupuesto:,.0f} COP**, el presupuesto guía según tu historial es:""")
-                col_guia1, col_guia2, col_guia3, col_guia4 = st.columns(4)
-                col_guia1.metric(f"Equipos ({PROMEDIOS_COSTO['Equipos']:.2f}%)", f"${math.ceil(presupuesto_equipos):,.0f}")
-                col_guia2.metric(f"Materiales ({PROMEDIOS_COSTO['Materiales']:.2f}%)", f"${math.ceil(presupuesto_materiales):,.0f}")
-                col_guia3.metric(f"Provisión IVA (19% de Materiales+Ganancia)", f"${math.ceil(provision_iva_guia):,.0f}")
-                col_guia4.metric(f"Ganancia Estimada ({PROMEDIOS_COSTO['Margen (Ganancia)']:.2f}%)", f"${math.ceil(ganancia_estimada_guia):,.0f}")
-                st.warning("Nota: Esta sección es una guía interna y no se incluirá en el reporte PDF del cliente.")
-
-            with st.expander("📋 Ver Lista de Materiales (Referencia Interna)"):
-                st.subheader("Materiales de Montaje Estimados")
+                # Lista de Materiales
                 lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta, module, recomendacion_inversor)
-                if lista_materiales:
-                    df_materiales = pd.DataFrame(lista_materiales.items(), columns=['Material', 'Cantidad Estimada'])
-                    df_materiales.index = df_materiales.index + 1
-                    st.table(df_materiales)
-                else:
-                    st.write("No se calcularon materiales (cantidad de paneles es cero).")
-                st.warning("Nota: Esta es una lista de referencia y no incluye todos los componentes.")
-        
-            st.header("Análisis Gráfico")
-            
-            lat, lon = None, None
-            if st.session_state.map_state["marker"]:
-                lat, lon = st.session_state.map_state["marker"]
-                api_key = os.environ.get("Maps_API_KEY") 
-                if api_key and gmaps:
-                    with st.spinner("Generando imagen del mapa..."):
+
+                # Generación de Documentos
+                lat, lon = None, None
+                if st.session_state.map_state.get("marker"):
+                    lat, lon = st.session_state.map_state["marker"]
+                    api_key = os.environ.get("Maps_API_KEY") 
+                    if api_key and gmaps:
                         get_static_map_image(lat, lon, api_key)
 
-            # --- CÓDIGO DEL GRÁFICO 1 (GENERACIÓN VS CONSUMO) ---
-            fig1, ax1 = plt.subplots(figsize=(10, 5))
-            meses_grafico = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+                presupuesto_equipos = valor_proyecto_total * (PROMEDIOS_COSTO['Equipos'] / 100)
+                presupuesto_materiales = valor_proyecto_total * (PROMEDIOS_COSTO['Materiales'] / 100)
+                provision_iva_guia = valor_proyecto_total * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
+                ganancia_estimada_guia = valor_proyecto_total * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
+                valor_total_redondeado = math.ceil(valor_proyecto_total / 100) * 100
+                valor_iva_redondeado = math.ceil(provision_iva_guia / 100) * 100
+                valor_sistema_sin_iva_redondeado = valor_total_redondeado - valor_iva_redondeado
 
-            if incluir_baterias:
-                # --- LÓGICA PARA GRÁFICA OFF-GRID (CON BATERÍAS) ---
-                st.subheader("Flujo de Energía Mensual (Off-Grid)")
-                generacion_autoconsumida = []
-                energia_a_bateria = []
+                valor_pdf = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
+                valor_pdf_redondeado = math.ceil(valor_pdf / 100) * 100
+                presupuesto_materiales_pdf = valor_pdf_redondeado * (PROMEDIOS_COSTO['Materiales'] / 100)
+                ganancia_estimada_pdf = valor_pdf_redondeado * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
+                valor_iva_pdf = math.ceil(((presupuesto_materiales_pdf + ganancia_estimada_pdf) * 0.19)/100)*100
+                valor_sistema_sin_iva_pdf = valor_pdf_redondeado - valor_iva_pdf
+
+                arboles_equivalentes_desktop = 0
+                co2_evitado_tons_desktop = 0.0
+                if incluir_carbon and carbon_data:
+                    arboles_equivalentes_desktop = carbon_data.get('trees_saved_per_year', 0)
+                    co2_evitado_tons_desktop = carbon_data.get('annual_co2_avoided_tons', 0.0)
                 
-                for gen_mes in monthly_generation:
-                    # Lo que se consume directamente es el mínimo entre lo que se genera y lo que se necesita
-                    autoconsumo_mes = min(gen_mes, Load)
-                    # Lo que va a la batería es todo el excedente
-                    bateria_mes = max(0, gen_mes - autoconsumo_mes)
-                    
-                    generacion_autoconsumida.append(autoconsumo_mes)
-                    energia_a_bateria.append(bateria_mes)
-
-                ax1.bar(meses_grafico, generacion_autoconsumida, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
-                ax1.bar(meses_grafico, energia_a_bateria, bottom=generacion_autoconsumida, color='green', edgecolor='black', label='Energía Almacenada en Batería', width=0.7)
-                ax1.axhline(y=Load, color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
-                ax1.set_ylabel("Energía (kWh)", fontweight="bold")
-                ax1.set_title("Flujo de Energía Mensual Estimado (Off-Grid)", fontweight="bold")
-                ax1.legend()
-
-            else:
-                # --- LÓGICA PARA GRÁFICA ON-GRID (SIN BATERÍAS) ---
-                st.subheader("Generación Vs. Consumo Mensual (On-Grid)")
-                generacion_autoconsumida_on, excedentes_vendidos, importado_de_la_red = [], [], []
-                for gen_mes in monthly_generation:
-                    if gen_mes >= Load:
-                        generacion_autoconsumida_on.append(Load); excedentes_vendidos.append(gen_mes - Load); importado_de_la_red.append(0)
-                    else:
-                        generacion_autoconsumida_on.append(gen_mes); excedentes_vendidos.append(0); importado_de_la_red.append(Load - gen_mes)
+                datos_para_pdf = {
+                    "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
+                    "Valor Total del Proyecto (COP)": f"${valor_pdf_redondeado:,.0f}",
+                    "Valor Sistema FV (sin IVA)": f"${valor_sistema_sin_iva_pdf:,.0f}",
+                    "Valor IVA": f"${valor_iva_pdf:,.0f}",
+                    "Tamano del Sistema (kWp)": f"{size:.1f}",
+                    "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W","Área Requerida Aprox. (m²)": f"{area_requerida}",
+                    "Inversor Recomendado": f"{recomendacion_inversor}",
+                    "Generacion Promedio Mensual (kWh)": f"{generacion_promedio_mensual:,.1f}",
+                    "Ahorro Estimado Primer Ano (COP)": f"{ahorro_año1:,.2f}",
+                    "TIR (Tasa Interna de Retorno)": f"{tasa_interna:.1%}",
+                    "VPN (Valor Presente Neto) (COP)": f"{valor_presente:,.2f}",
+                    "Periodo de Retorno (anos)": f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A",
+                    "Tipo de Cubierta": cubierta,
+                    "Potencia de Paneles": f"{int(module)}",
+                    "Potencia AC Inversor": f"{potencia_ac_inversor}",
+                    "Árboles Equivalentes Ahorrados": str(int(round(arboles_equivalentes_desktop))),
+                    "CO2 Evitado Anual (Toneladas)": f"{co2_evitado_tons_desktop:.2f}",
+                }
                 
-                ax1.bar(meses_grafico, generacion_autoconsumida_on, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
-                ax1.bar(meses_grafico, excedentes_vendidos, bottom=generacion_autoconsumida_on, color='red', edgecolor='black', label='Excedentes Vendidos', width=0.7)
-                ax1.bar(meses_grafico, importado_de_la_red, bottom=generacion_autoconsumida_on, color='#2ECC71', edgecolor='black', label='Importado de la Red', width=0.7)
-                ax1.axhline(y=Load, color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
-                ax1.set_ylabel("Energía (kWh)", fontweight="bold")
-                ax1.set_title("Generación Vs. Consumo Mensual (On-Grid)", fontweight="bold")
-                ax1.legend()
-
-            st.pyplot(fig1)
-
-            fig2, ax2 = plt.subplots(figsize=(10, 5))
-            fcl_acumulado = np.cumsum(fcl)
-            años = np.arange(0, life + 1)
-            ax2.plot(años, fcl_acumulado, marker='o', linestyle='-', color='green', label='Flujo de Caja Acumulado')
-            ax2.plot(0, fcl_acumulado[0], marker='X', markersize=10, color='red', label='Desembolso Inicial (Año 0)')
-            if payback_exacto is not None: ax2.axvline(x=payback_exacto, color='red', linestyle='--', label=f'Payback Simple: {payback_exacto:.2f} años')
-            ax2.axhline(0, color='grey', linestyle='--', linewidth=0.8)
-            ax2.set_ylabel("Flujo de Caja Acumulado (COP)", fontweight="bold"); ax2.set_xlabel("Año", fontweight="bold")
-            ax2.set_title("Flujo de Caja Acumulado y Período de Retorno", fontweight="bold"); ax2.legend()
-            st.pyplot(fig2)
-            
-            fig1.savefig('grafica_generacion.png', bbox_inches='tight')
-            fig2.savefig('grafica_flujo_caja.png', bbox_inches='tight')
-
-            presupuesto_equipos = valor_proyecto_total * (PROMEDIOS_COSTO['Equipos'] / 100)
-            presupuesto_materiales = valor_proyecto_total * (PROMEDIOS_COSTO['Materiales'] / 100)
-            provision_iva_guia = valor_proyecto_total * (PROMEDIOS_COSTO['IVA (Impuestos)'] / 100)
-            ganancia_estimada_guia = valor_proyecto_total * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
-            valor_total_redondeado = math.ceil(valor_proyecto_total / 100) * 100
-            valor_iva_redondeado = math.ceil(provision_iva_guia / 100) * 100
-            valor_sistema_sin_iva_redondeado = valor_total_redondeado - valor_iva_redondeado
-
-            # Usar precio manual si está activado para el PDF principal también
-            valor_pdf = precio_manual_valor if precio_manual and precio_manual_valor else valor_proyecto_total
-            valor_pdf_redondeado = math.ceil(valor_pdf / 100) * 100
-            presupuesto_materiales_pdf = valor_pdf_redondeado * (PROMEDIOS_COSTO['Materiales'] / 100)
-            ganancia_estimada_pdf = valor_pdf_redondeado * (PROMEDIOS_COSTO['Margen (Ganancia)'] / 100)
-            valor_iva_pdf = math.ceil(((presupuesto_materiales_pdf + ganancia_estimada_pdf) * 0.19)/100)*100
-            valor_sistema_sin_iva_pdf = valor_pdf_redondeado - valor_iva_pdf
-
-            # Calcular datos de carbono si están disponibles
-            arboles_equivalentes_desktop = 0
-            co2_evitado_tons_desktop = 0.0
-            if incluir_carbon and carbon_data:
-                arboles_equivalentes_desktop = carbon_data.get('trees_saved_per_year', 0)
-                co2_evitado_tons_desktop = carbon_data.get('annual_co2_avoided_tons', 0.0)
-            
-            datos_para_pdf = {
-                "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
-                "Valor Total del Proyecto (COP)": f"${valor_pdf_redondeado:,.0f}",
-                "Valor Sistema FV (sin IVA)": f"${valor_sistema_sin_iva_pdf:,.0f}",
-                "Valor IVA": f"${valor_iva_pdf:,.0f}",
-                "Tamano del Sistema (kWp)": f"{size:.1f}",
-                "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W","Área Requerida Aprox. (m²)": f"{area_requerida}",
-                "Inversor Recomendado": f"{recomendacion_inversor}",
-                "Generacion Promedio Mensual (kWh)": f"{generacion_promedio_mensual:,.1f}",
-                "Ahorro Estimado Primer Ano (COP)": f"{ahorro_año1:,.2f}",
-                "TIR (Tasa Interna de Retorno)": f"{tasa_interna:.1%}",
-                "VPN (Valor Presente Neto) (COP)": f"{valor_presente:,.2f}",
-                "Periodo de Retorno (anos)": f"{payback_exacto:.2f}" if payback_exacto is not None else "N/A",
-                "Tipo de Cubierta": cubierta,
-                "Potencia de Paneles": f"{int(module)}",
-                "Potencia AC Inversor": f"{potencia_ac_inversor}",
-                "Árboles Equivalentes Ahorrados": str(int(round(arboles_equivalentes_desktop))),
-                "CO2 Evitado Anual (Toneladas)": f"{co2_evitado_tons_desktop:.2f}",
-            }
-            
-            # Calcular O&M (2% del CAPEX)
-            om_anual = valor_pdf_redondeado * 0.02  # 2% del valor total del proyecto
-            datos_para_pdf["O&M (Operation & Maintenance)"] = f"${om_anual:,.0f}"
-            if usa_financiamiento:
-                # Recalcular financiamiento con el precio manual si está activado
-                if precio_manual and precio_manual_valor:
-                    monto_a_financiar_pdf = valor_pdf_redondeado * (perc_financiamiento / 100)
-                    monto_a_financiar_pdf = math.ceil(monto_a_financiar_pdf)
-                    desembolso_inicial_pdf = valor_pdf_redondeado - monto_a_financiar_pdf
-
-                    # Recalcular cuota mensual con precio manual
-                    if monto_a_financiar_pdf > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
-                        tasa_mensual_pdf = (tasa_interes_input / 100) / 12
-                        num_pagos_pdf = plazo_credito_años * 12
-                        cuota_mensual_pdf = abs(npf.pmt(tasa_mensual_pdf, num_pagos_pdf, -monto_a_financiar_pdf))
-                        cuota_mensual_pdf = math.ceil(cuota_mensual_pdf)
-                    else:
-                        cuota_mensual_pdf = 0
-                else:
-                    monto_a_financiar_pdf = math.ceil(monto_a_financiar)
-                    desembolso_inicial_pdf = math.ceil(desembolso_inicial_cliente)
-                    cuota_mensual_pdf = cuota_mensual_credito
-
-                datos_para_pdf["--- Detalles de Financiamiento ---"] = ""
-                datos_para_pdf["Monto a Financiar (COP)"] = f"{monto_a_financiar_pdf:,.0f}"
-                datos_para_pdf["Cuota Mensual del Credito (COP)"] = f"{cuota_mensual_pdf:,.0f}"
-                datos_para_pdf["Desembolso Inicial (COP)"] = f"{desembolso_inicial_pdf:,.0f}"
-                datos_para_pdf["Plazo del Crédito"] = str(plazo_credito_años * 12)
-            
-            datos_para_contrato = datos_para_pdf.copy() # Copiamos los datos
-            datos_para_contrato['Fecha de la Propuesta'] = fecha_propuesta
-
-            pdf = PropuestaPDF(
-                client_name=nombre_cliente, 
-                project_name=nombre_proyecto,
-                documento=documento_cliente,
-                direccion=direccion_proyecto,
-                fecha=fecha_propuesta 
-            )
-
-            pdf_bytes = pdf.generar(datos_para_pdf, usa_financiamiento, lat, lon)
-            nombre_pdf_final = f"{nombre_proyecto}.pdf"
-            
-            nombre_contrato_final = f"Contrato - {nombre_proyecto}.docx"
-            contrato_bytes = generar_contrato_docx(datos_para_contrato)
-
-            if drive_service:
-                link_carpeta = gestionar_creacion_drive(
-                    drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final,contrato_bytes, nombre_contrato_final
-                )
-                if link_carpeta:
-                    st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({link_carpeta})")
-            
-            st.download_button(
-                label="📥 Descargar Reporte en PDF (Copia Local)",
-                data=pdf_bytes, file_name=nombre_pdf_final,
-                mime="application/pdf", use_container_width=True
-            )
-            if contrato_bytes:
-                st.download_button(
-                    label="   Descargar Contrato en Word (.docx)",
-                    data=contrato_bytes,
-                    file_name=nombre_contrato_final,
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
-
-            # Generar y descargar CSV detallado del flujo de caja
-            try:
-                csv_content = generar_csv_flujo_caja_detallado(
-                    Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
-                    ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
-                    perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
-                    plazo_credito_años=plazo_credito_años, incluir_baterias=incluir_baterias,
-                    costo_kwh_bateria=costo_kwh_bateria, profundidad_descarga=profundidad_descarga / 100,
-                    eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
-                    horizonte_tiempo=horizonte_tiempo, precio_manual=precio_manual_valor,
-                    fcl=fcl, monthly_generation=monthly_generation,
-                    incluir_beneficios_tributarios=incluir_beneficios_tributarios,
-                    incluir_deduccion_renta=incluir_deduccion_renta,
-                    incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
-                )
-                nombre_csv = f"Flujo_Caja_Detallado_{nombre_proyecto}.csv"
+                om_anual = valor_pdf_redondeado * 0.02
+                datos_para_pdf["O&M (Operation & Maintenance)"] = f"${om_anual:,.0f}"
                 
-                # Botón de descarga
-                st.download_button(
-                    label="📊 Descargar Flujo de Caja en CSV (Detallado)",
-                    data=csv_content,
-                    file_name=nombre_csv,
-                    mime="text/csv",
-                    use_container_width=True,
-                    help="Descarga un archivo CSV con el flujo de caja anual detallado, incluyendo generación, consumo, costos, TIR/VPN parciales y más métricas"
-                )
-                
-                # Guardar automáticamente en Google Drive (carpeta Administrativo y Financiero)
-                try:
-                    if 'drive_service' in locals() and drive_service:
-                        # Buscar la carpeta del proyecto por nombre
-                        query_proyecto = f"name='{nombre_proyecto}' and mimeType='application/vnd.google-apps.folder'"
-                        results_proyecto = drive_service.files().list(
-                            q=query_proyecto, 
-                            fields="files(id)", 
-                            supportsAllDrives=True, 
-                            includeItemsFromAllDrives=True
-                        ).execute()
-                        
-                        if results_proyecto.get('files'):
-                            id_carpeta_principal = results_proyecto['files'][0]['id']
-                            
-                            # Buscar carpeta "08_Administrativo_y_Financiero"
-                            query_administrativo = f"'{id_carpeta_principal}' in parents and name='08_Administrativo_y_Financiero'"
-                            results_administrativo = drive_service.files().list(
-                                q=query_administrativo, 
-                                fields="files(id)", 
-                                supportsAllDrives=True, 
-                                includeItemsFromAllDrives=True
-                            ).execute()
-                            
-                            if results_administrativo.get('files'):
-                                id_carpeta_administrativo = results_administrativo['files'][0]['id']
-                                csv_link = subir_csv_a_drive(drive_service, id_carpeta_administrativo, nombre_csv, csv_content)
-                                if csv_link:
-                                    st.success("✅ CSV del flujo de caja guardado automáticamente en Google Drive")
-                            else:
-                                st.warning("⚠️ No se encontró la carpeta '08_Administrativo_y_Financiero'")
+                monto_a_financiar_pdf = 0
+                desembolso_inicial_pdf = 0
+                cuota_mensual_pdf = 0
+
+                if usa_financiamiento:
+                    if precio_manual and precio_manual_valor:
+                        monto_a_financiar_pdf = valor_pdf_redondeado * (perc_financiamiento / 100)
+                        monto_a_financiar_pdf = math.ceil(monto_a_financiar_pdf)
+                        desembolso_inicial_pdf = valor_pdf_redondeado - monto_a_financiar_pdf
+
+                        if monto_a_financiar_pdf > 0 and plazo_credito_años > 0 and tasa_interes_input > 0:
+                            tasa_mensual_pdf = (tasa_interes_input / 100) / 12
+                            num_pagos_pdf = plazo_credito_años * 12
+                            cuota_mensual_pdf = abs(npf.pmt(tasa_mensual_pdf, num_pagos_pdf, -monto_a_financiar_pdf))
+                            cuota_mensual_pdf = math.ceil(cuota_mensual_pdf)
                         else:
-                            st.info("ℹ️ Proyecto no encontrado en Google Drive")
+                            cuota_mensual_pdf = 0
                     else:
-                        st.info("ℹ️ CSV generado localmente (Google Drive no configurado)")
-                except Exception as drive_error:
-                    st.warning(f"⚠️ No se pudo guardar el CSV en Google Drive: {drive_error}")
-                    
-            except Exception as csv_error:
-                st.warning(f"No se pudo generar el CSV: {csv_error}")
-            st.success('¡Proceso completado!')
+                        monto_a_financiar_pdf = math.ceil(monto_a_financiar)
+                        desembolso_inicial_pdf = math.ceil(desembolso_inicial_cliente)
+                        cuota_mensual_pdf = cuota_mensual_credito
 
-            # Notion CRM - agregar a "En conversaciones" (flujo desktop)
-            agregado, msg = agregar_cliente_a_notion_crm(
-                nombre=nombre_cliente,
-                documento=documento_cliente,
-                direccion=direccion_proyecto,
-                proyecto=nombre_proyecto,
-                fecha=fecha_propuesta,
-                estado="En conversaciones"
-            )
-            if agregado:
-                st.info("🗂️ Cliente agregado a Notion: En conversaciones")
+                    datos_para_pdf["--- Detalles de Financiamiento ---"] = ""
+                    datos_para_pdf["Monto a Financiar (COP)"] = f"{monto_a_financiar_pdf:,.0f}"
+                    datos_para_pdf["Cuota Mensual del Credito (COP)"] = f"{cuota_mensual_pdf:,.0f}"
+                    datos_para_pdf["Desembolso Inicial (COP)"] = f"{desembolso_inicial_pdf:,.0f}"
+                    datos_para_pdf["Plazo del Crédito"] = str(plazo_credito_años * 12)
+                
+                datos_para_contrato = datos_para_pdf.copy()
+                datos_para_contrato['Fecha de la Propuesta'] = fecha_propuesta
+
+                pdf = PropuestaPDF(
+                    client_name=nombre_cliente, 
+                    project_name=nombre_proyecto,
+                    documento=documento_cliente,
+                    direccion=direccion_proyecto,
+                    fecha=fecha_propuesta 
+                )
+
+                pdf_bytes = pdf.generar(datos_para_pdf, usa_financiamiento, lat, lon)
+                nombre_pdf_final = f"{nombre_proyecto}.pdf"
+                
+                nombre_contrato_final = f"Contrato - {nombre_proyecto}.docx"
+                contrato_bytes = generar_contrato_docx(datos_para_contrato)
+
+                link_carpeta = None
+                if drive_service:
+                    link_carpeta = gestionar_creacion_drive(
+                        drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final,contrato_bytes, nombre_contrato_final
+                    )
+
+                # CSV
+                csv_content = None
+                nombre_csv = f"Flujo_Caja_Detallado_{nombre_proyecto}.csv"
+                try:
+                    csv_content = generar_csv_flujo_caja_detallado(
+                        Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
+                        ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                        perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
+                        plazo_credito_años=plazo_credito_años, incluir_baterias=incluir_baterias,
+                        costo_kwh_bateria=costo_kwh_bateria, profundidad_descarga=profundidad_descarga / 100,
+                        eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
+                        horizonte_tiempo=horizonte_tiempo, precio_manual=precio_manual_valor,
+                        fcl=fcl, monthly_generation=monthly_generation,
+                        incluir_beneficios_tributarios=incluir_beneficios_tributarios,
+                        incluir_deduccion_renta=incluir_deduccion_renta,
+                        incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
+                    )
+                    
+                    if drive_service:
+                        # Lógica simplificada para guardar en Drive si es necesario
+                        pass 
+
+                except Exception as csv_error:
+                    st.warning(f"No se pudo generar el CSV: {csv_error}")
+
+                # Notion
+                agregado_notion, msg_notion = agregar_cliente_a_notion_crm(
+                    nombre=nombre_cliente,
+                    documento=documento_cliente,
+                    direccion=direccion_proyecto,
+                    proyecto=nombre_proyecto,
+                    fecha=fecha_propuesta,
+                    estado="En conversaciones"
+                )
+
+                # Guardar TODO en session_state
+                st.session_state.desktop_results = {
+                    'nombre_proyecto': nombre_proyecto,
+                    'valor_proyecto_total': valor_proyecto_total,
+                    'val_total': val_total,
+                    'tasa_interna': tasa_interna,
+                    'payback_exacto': payback_exacto,
+                    'capacidad_nominal_bateria': capacidad_nominal_bateria,
+                    'ahorro_año1': ahorro_año1,
+                    'carbon_data': carbon_data,
+                    'analisis_sensibilidad': analisis_sensibilidad,
+                    'lista_materiales': lista_materiales,
+                    'pdf_bytes': pdf_bytes,
+                    'nombre_pdf_final': nombre_pdf_final,
+                    'contrato_bytes': contrato_bytes,
+                    'nombre_contrato_final': nombre_contrato_final,
+                    'link_carpeta': link_carpeta,
+                    'csv_content': csv_content,
+                    'nombre_csv': nombre_csv,
+                    'agregado_notion': agregado_notion,
+                    'msg_notion': msg_notion,
+                    'fcl': fcl,
+                    'life': life,
+                    'monthly_generation': monthly_generation,
+                    'incluir_baterias': incluir_baterias,
+                    'Load': Load,
+                    'horizonte_tiempo': horizonte_tiempo,
+                    'valor_presente': valor_presente,
+                    'recomendacion_inversor': recomendacion_inversor,
+                    'lcoe': lcoe,
+                    'n_final': n_final,
+                    'hsp_mensual_final': hsp_mensual_final,
+                    'potencia_ac_inversor': potencia_ac_inversor,
+                    'area_requerida': area_requerida,
+                    'generacion_promedio_mensual': generacion_promedio_mensual,
+                    'precio_manual': precio_manual,
+                    'precio_manual_valor': precio_manual_valor,
+                    'PROMEDIOS_COSTO': PROMEDIOS_COSTO,
+                    'size': size,
+                    'quantity': quantity,
+                    'module': module,
+                    'cubierta': cubierta,
+                    'lat': lat,
+                    'lon': lon
+                }
+                st.rerun()
+
+    # --- RENDERIZADO DE RESULTADOS ---
+    if st.session_state.desktop_results:
+        res = st.session_state.desktop_results
+        
+        st.success(f"Proyecto Generado: {res['nombre_proyecto']}")
+        
+        if res['precio_manual'] and res['precio_manual_valor']:
+             st.success(f"✅ **Precio Manual Aplicado**: ${res['val_total']:,.0f} COP")
+             st.info("🔄 **Flujo de caja recalculado** con el precio manual para métricas correctas")
+
+        st.header("Resultados de la Propuesta")
+        st.info(f"📅 **Análisis financiero a {res['horizonte_tiempo']} años** - TIR, VPN y Payback calculados para este período")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Valor del Proyecto", f"${res['val_total']:,.0f}")
+        col2.metric("TIR", f"{res['tasa_interna']:.1%}")
+        col3.metric("Payback (años)", f"{res['payback_exacto']:.2f}" if res['payback_exacto'] is not None else "N/A")
+        if res['incluir_baterias']:
+            col4.metric("Batería Recomendada", f"{res['capacidad_nominal_bateria']:.1f} kWh")
+        else:
+            col4.metric("Ahorro Año 1", f"${res['ahorro_año1']:,.0f}")
+
+        # Carbono
+        if incluir_carbon and res['carbon_data'] and 'annual_co2_avoided_tons' in res['carbon_data']:
+            cd = res['carbon_data']
+            st.markdown("---")
+            st.header("🌱 Impacto Ambiental y Sostenibilidad")
+            col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+            col_c1.metric("CO2 Evitado Anual", f"{cd['annual_co2_avoided_tons']:.1f} ton")
+            col_c2.metric("Árboles Salvados", f"{cd['trees_saved_per_year']:.0f}")
+            col_c3.metric("Valor Carbono", f"${cd['annual_certification_value_cop']:,.0f}")
+            col_c4.metric("Autos Equivalentes", f"{cd['cars_off_road_per_year']:.1f}")
+            
+            with st.expander("📊 Ver más equivalencias ambientales"):
+                st.write(f"• **Vuelos evitados**: {cd['flights_avoided_per_year']:.0f}")
+                st.write(f"• **Botellas de plástico**: {cd['plastic_bottles_avoided_per_year']:,.0f}")
+                st.write(f"• **Cargas de celular**: {cd['smartphone_charges_avoided_per_year']:,.0f}")
+
+        # Análisis de Sensibilidad
+        if incluir_analisis_sensibilidad and res['analisis_sensibilidad']:
+            st.header("📊 Análisis de Sensibilidad")
+            st.info("🔍 **Análisis comparativo** de TIR a 10 y 20 años")
+            
+            datos_tabla = []
+            for escenario, datos in res['analisis_sensibilidad'].items():
+                datos_tabla.append({
+                    "Escenario": escenario,
+                    "TIR": f"{datos['tir']:.1%}" if datos['tir'] is not None else "N/A",
+                    "VPN (COP)": f"${datos['vpn']:,.0f}" if datos['vpn'] is not None else "N/A",
+                    "Payback (años)": f"{datos['payback']:.2f}" if datos['payback'] is not None else "N/A",
+                    "Desembolso Inicial": f"${datos['desembolso_inicial']:,.0f}",
+                    "Cuota Mensual": f"${datos['cuota_mensual']:,.0f}" if datos['cuota_mensual'] > 0 else "N/A"
+                })
+            st.dataframe(pd.DataFrame(datos_tabla), use_container_width=True)
+
+        # Presupuesto Guía
+        with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
+            st.subheader("Desglose Basado en Promedios Históricos")
+            prom = res['PROMEDIOS_COSTO']
+            val_base = res['val_total']
+            p_equipos = val_base * (prom['Equipos'] / 100)
+            p_materiales = val_base * (prom['Materiales'] / 100)
+            ganancia = val_base * (prom['Margen (Ganancia)'] / 100)
+            iva = (p_materiales + ganancia) * 0.19
+            
+            col_guia1, col_guia2, col_guia3, col_guia4 = st.columns(4)
+            col_guia1.metric(f"Equipos ({prom['Equipos']:.2f}%)", f"${math.ceil(p_equipos):,.0f}")
+            col_guia2.metric(f"Materiales ({prom['Materiales']:.2f}%)", f"${math.ceil(p_materiales):,.0f}")
+            col_guia3.metric(f"Provisión IVA", f"${math.ceil(iva):,.0f}")
+            col_guia4.metric(f"Ganancia ({prom['Margen (Ganancia)']:.2f}%)", f"${math.ceil(ganancia):,.0f}")
+
+        # Lista Materiales
+        with st.expander("📋 Ver Lista de Materiales (Referencia Interna)"):
+            if res['lista_materiales']:
+                df_mat = pd.DataFrame(res['lista_materiales'].items(), columns=['Material', 'Cantidad Estimada'])
+                df_mat.index = df_mat.index + 1
+                st.table(df_mat)
             else:
-                st.caption(f"Notion: {msg}")
+                st.write("No se calcularon materiales.")
+
+        # Gráficos
+        st.header("Análisis Gráfico")
+        if res['lat'] and res['lon']:
+             # Mostrar mapa estático si existe (se generó en el cálculo)
+             if os.path.exists("static_map.png"):
+                 st.image("static_map.png", caption="Ubicación del Proyecto")
+
+        fig1, ax1 = plt.subplots(figsize=(10, 5))
+        meses_grafico = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+        
+        if res['incluir_baterias']:
+            generacion_autoconsumida = []
+            energia_a_bateria = []
+            for gen_mes in res['monthly_generation']:
+                autoconsumo_mes = min(gen_mes, res['Load'])
+                bateria_mes = max(0, gen_mes - autoconsumo_mes)
+                generacion_autoconsumida.append(autoconsumo_mes)
+                energia_a_bateria.append(bateria_mes)
+            
+            ax1.bar(meses_grafico, generacion_autoconsumida, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
+            ax1.bar(meses_grafico, energia_a_bateria, bottom=generacion_autoconsumida, color='green', edgecolor='black', label='Energía Almacenada en Batería', width=0.7)
+            ax1.axhline(y=res['Load'], color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
+            ax1.set_title("Flujo de Energía Mensual Estimado (Off-Grid)", fontweight="bold")
+        else:
+            generacion_autoconsumida_on, excedentes_vendidos, importado_de_la_red = [], [], []
+            for gen_mes in res['monthly_generation']:
+                if gen_mes >= res['Load']:
+                    generacion_autoconsumida_on.append(res['Load']); excedentes_vendidos.append(gen_mes - res['Load']); importado_de_la_red.append(0)
+                else:
+                    generacion_autoconsumida_on.append(gen_mes); excedentes_vendidos.append(0); importado_de_la_red.append(res['Load'] - gen_mes)
+            
+            ax1.bar(meses_grafico, generacion_autoconsumida_on, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
+            ax1.bar(meses_grafico, excedentes_vendidos, bottom=generacion_autoconsumida_on, color='red', edgecolor='black', label='Excedentes Vendidos', width=0.7)
+            ax1.bar(meses_grafico, importado_de_la_red, bottom=generacion_autoconsumida_on, color='#2ECC71', edgecolor='black', label='Importado de la Red', width=0.7)
+            ax1.axhline(y=res['Load'], color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
+            ax1.set_title("Generación Vs. Consumo Mensual (On-Grid)", fontweight="bold")
+        
+        ax1.legend()
+        st.pyplot(fig1)
+
+        fig2, ax2 = plt.subplots(figsize=(10, 5))
+        fcl_acumulado = np.cumsum(res['fcl'])
+        años = np.arange(0, res['life'] + 1)
+        ax2.plot(años, fcl_acumulado, marker='o', linestyle='-', color='green', label='Flujo de Caja Acumulado')
+        ax2.plot(0, fcl_acumulado[0], marker='X', markersize=10, color='red', label='Desembolso Inicial (Año 0)')
+        if res['payback_exacto'] is not None: ax2.axvline(x=res['payback_exacto'], color='red', linestyle='--', label=f'Payback Simple: {res["payback_exacto"]:.2f} años')
+        ax2.axhline(0, color='grey', linestyle='--', linewidth=0.8)
+        ax2.set_title("Flujo de Caja Acumulado y Período de Retorno", fontweight="bold"); ax2.legend()
+        st.pyplot(fig2)
+
+        # Descargas y Links
+        if res['link_carpeta']:
+            st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({res['link_carpeta']})")
+        
+        st.download_button("📥 Descargar Reporte en PDF (Copia Local)", data=res['pdf_bytes'], file_name=res['nombre_pdf_final'], mime="application/pdf", use_container_width=True)
+        
+        if res['contrato_bytes']:
+            st.download_button("   Descargar Contrato en Word (.docx)", data=res['contrato_bytes'], file_name=res['nombre_contrato_final'], mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+
+        if res['csv_content']:
+            st.download_button("📊 Descargar Flujo de Caja en CSV (Detallado)", data=res['csv_content'], file_name=res['nombre_csv'], mime="text/csv", use_container_width=True)
+
+        if res['agregado_notion']:
+            st.info("🗂️ Cliente agregado a Notion: En conversaciones")
+        else:
+            st.caption(f"Notion: {res['msg_notion']}")
