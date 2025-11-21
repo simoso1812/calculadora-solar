@@ -7,6 +7,9 @@ import os
 import streamlit as st
 
 class PropuestaPDF(FPDF):
+    BRAND_COLOR = (250, 50, 63)
+    TEXT_COLOR = (0, 0, 0)
+
     def __init__(self, client_name="Cliente", project_name="Proyecto", 
                  documento="", direccion="", fecha=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -26,6 +29,36 @@ class PropuestaPDF(FPDF):
             st.warning(f"No se encontraron todos los archivos de fuente (.ttf). Usando Arial. Error: {e}")
             self.font_family = 'Arial'
 
+    def _format_currency(self, value):
+        """Formatea valores monetarios."""
+        if isinstance(value, (int, float)):
+            return f"$ {value:,.0f}"
+        if isinstance(value, str):
+            value = value.replace('$', '').replace(',', '').strip()
+            try:
+                val_float = float(value)
+                return f"$ {val_float:,.0f}"
+            except ValueError:
+                pass
+        return "$ 0"
+
+    def _format_number(self, value, decimals=0):
+        """Formatea números con decimales opcionales."""
+        if isinstance(value, (int, float)):
+            val_float = float(value)
+        elif isinstance(value, str):
+            value = value.replace(',', '').strip()
+            try:
+                val_float = float(value)
+            except ValueError:
+                return "0"
+        else:
+            return "0"
+            
+        if decimals == 0:
+            return f"{val_float:,.0f}"
+        return f"{val_float:,.{decimals}f}"
+
     def header(self): pass
     def footer(self): pass
 
@@ -33,7 +66,7 @@ class PropuestaPDF(FPDF):
         self.add_page()
         self.image('assets/1.jpg', x=0, y=0, w=210)
         
-        self.set_text_color(250, 50, 63) # Color rojo/rosado
+        self.set_text_color(*self.BRAND_COLOR)
         
         # --- Dirección del Proyecto (con MultiCell para auto-ajuste) ---
         self.set_xy(115, 47.5) 
@@ -58,7 +91,7 @@ class PropuestaPDF(FPDF):
     def crear_resumen_ejecutivo(self, datos):
         self.add_page()
         self.image('assets/3.jpg', x=0, y=0, w=210)
-        self.set_text_color(0, 0, 0) # Color negro
+        self.set_text_color(*self.TEXT_COLOR)
 
         # --- 1. Bloque de Ahorro Anual (redondeado a entero en millones) ---
         valor_ahorro_str = datos.get('Ahorro Estimado Primer Ano (COP)', '0').replace(',', '').replace('$', '')
@@ -67,46 +100,39 @@ class PropuestaPDF(FPDF):
             valor_ahorro_entero = int(round(valor_ahorro_millones))
         except:
             valor_ahorro_entero = 0
-        self.set_font('DMSans', 'B', 40)
-        self.set_xy(52, 58)  # Ajustar coordenadas según la nueva plantilla
+        self.set_font(self.font_family, 'B', 40)
+        self.set_xy(52, 58)
         self.cell(w=30, text=str(valor_ahorro_entero), align='L')
 
         # --- 2. Bloque de Cantidad de Módulos Fotovoltaicos ---
         cantidad_paneles = datos.get('Cantidad de Paneles', '0')
-        # Extraer solo el número si viene en formato "XX de XXXW"
         if ' de ' in cantidad_paneles:
             cantidad_paneles = cantidad_paneles.split(' de ')[0]
-        try:
-            cantidad_num = int(cantidad_paneles)
-        except:
-            cantidad_num = 0
-        self.set_font('DMSans', 'B', 40)
-        self.set_xy(51, 105)  # Ajustar coordenadas según la nueva plantilla
-        self.cell(w=30, text=str(cantidad_num), align='L')
+        
+        cantidad_num = self._format_number(cantidad_paneles)
+        
+        self.set_font(self.font_family, 'B', 40)
+        self.set_xy(51, 105)
+        self.cell(w=30, text=cantidad_num, align='L')
 
         # --- 3. Bloque de Número de Árboles ---
         valor_arboles = datos.get('Árboles Equivalentes Ahorrados', '0')
-        # Si viene como string, extraer número
         if isinstance(valor_arboles, str):
             valor_arboles = valor_arboles.replace('+', '').strip()
-        try:
-            arboles_num = int(round(float(valor_arboles)))
-        except:
-            arboles_num = 0
-        self.set_font('DMSans', 'B', 40)
-        self.set_xy(51, 153)  # Ajustar coordenadas según la nueva plantilla
-        self.cell(w=30, text=str(arboles_num), align='L')
+        
+        arboles_num = self._format_number(valor_arboles)
+        
+        self.set_font(self.font_family, 'B', 40)
+        self.set_xy(51, 153)
+        self.cell(w=30, text=arboles_num, align='L')
 
         # --- 4. Bloque de Toneladas de CO2 Evitadas ---
         co2_tons = datos.get('CO2 Evitado Anual (Toneladas)', '0')
-        try:
-            co2_tons_num = float(co2_tons)
-            co2_tons_redondeado = round(co2_tons_num, 1)  # Una decimal
-        except:
-            co2_tons_redondeado = 0.0
-        self.set_font('DMSans', 'B', 40)
-        self.set_xy(16, 189)  # Ajustar coordenadas según la nueva plantilla
-        self.cell(w=30, text=f"{co2_tons_redondeado:.1f}", align='L')
+        co2_formatted = self._format_number(co2_tons, decimals=1)
+        
+        self.set_font(self.font_family, 'B', 40)
+        self.set_xy(16, 189)
+        self.cell(w=30, text=co2_formatted, align='L')
     
     def crear_detalle_sistema(self, datos):
         self.add_page()
@@ -116,15 +142,13 @@ class PropuestaPDF(FPDF):
 
         # --- 1. Número grande al lado de la 'x' ---
         self.set_xy(43, 76) 
-        self.set_font('DMSans', 'B', 45)
-        # CORRECCIÓN: Color de texto a negro
-        self.set_text_color(0, 0, 0) 
+        self.set_font(self.font_family, 'B', 45)
+        self.set_text_color(*self.TEXT_COLOR) 
         self.cell(w=30, txt=cantidad_paneles, align='L')
 
         # --- 2. Número pequeño dentro del párrafo ---
         self.set_xy(34, 117) 
-        self.set_text_color(0, 0, 0)
-        # CORRECCIÓN: Estilo de fuente a normal (sin 'B')
+        self.set_text_color(*self.TEXT_COLOR)
         self.set_font('Roboto', '', 15) 
         self.cell(w=10, txt=cantidad_paneles, align='C')
 
@@ -133,7 +157,6 @@ class PropuestaPDF(FPDF):
         self.image('assets/5.jpg', x=0, y=0, w=210)
         
         # --- 1. Colocar la gráfica de generación ---
-        # Coordenadas (X, Y) y Ancho (W) estimados en mm. ¡Estos son los valores a ajustar!
         x_grafica = 15
         y_grafica = 120
         ancho_grafica = 180
@@ -141,29 +164,23 @@ class PropuestaPDF(FPDF):
             self.image('grafica_generacion.png', x=x_grafica, y=y_grafica, w=ancho_grafica)
         
         # --- 2. Escribir solo el número de la generación promedio ---
-        # Coordenadas estimadas para el número. ¡Este es el otro valor a ajustar!
         self.set_xy(86, 97)
-        self.set_text_color(0, 0, 0) # Texto negro
-        self.set_font('Roboto', 'B', 15) # Negrita
+        self.set_text_color(*self.TEXT_COLOR)
+        self.set_font('Roboto', 'B', 15)
         
-        # Formateamos el número sin decimales (0f)
-        try:
-            valor_generacion = float(datos.get('Generacion Promedio Mensual (kWh)', '0').replace(',', ''))
-            self.cell(w=30, txt=f"{valor_generacion:,.0f}", align='L')
-        except ValueError:
-            pass
+        valor_generacion = datos.get('Generacion Promedio Mensual (kWh)', '0')
+        formatted_gen = self._format_number(valor_generacion)
+        self.cell(w=30, txt=formatted_gen, align='L')
     
     def crear_pagina_ubicacion(self, lat, lon):
         self.add_page()
         self.image('assets/6.jpg', x=0, y=0, w=210)
         
         # --- Coordenadas dinámicas ---
-        # Posicionamos el cursor para escribir las coordenadas
-        self.set_xy(20, 88) # Puedes ajustar esta coordenada Y si es necesario
-        self.set_text_color(0, 0, 0)
+        self.set_xy(20, 88)
+        self.set_text_color(*self.TEXT_COLOR)
         self.set_font('Roboto', '', 15)
         
-        # Escribimos únicamente las coordenadas
         self.cell(w=0, h=5, txt=f"{lat:.6f}, {lon:.6f}")
         
         # --- Imagen del mapa estático ---
@@ -182,14 +199,11 @@ class PropuestaPDF(FPDF):
         self.image('assets/7.jpg', x=0, y=0, w=210)
         
         self.set_font('Roboto', '', 14)
-        self.set_text_color(0, 0, 0)
+        self.set_text_color(*self.TEXT_COLOR)
         
         # --- Posicionamos cada dato con alineación a la derecha ---
-        
-        # Definimos el área donde debe ir el texto.
-        # El texto comenzará a escribirse desde x_inicio y terminará en x_fin.
-        x_inicio = 90 # Margen izquierdo de la columna de datos (ajustable)
-        ancho_total = 88 # Ancho máximo para el texto (ajustable)
+        x_inicio = 90
+        ancho_total = 88
 
         # Tipo de cubierta
         self.set_xy(x_inicio, 55)
@@ -227,32 +241,34 @@ class PropuestaPDF(FPDF):
         self.add_page()
         self.image('assets/9.jpg', x=0, y=0, w=210)
         
-        self.set_text_color(0, 0, 0)
+        self.set_text_color(*self.TEXT_COLOR)
         
-        # --- Posicionamos los valores con alineación a la derecha ---
-        # El área de texto terminará en la coordenada X de 198mm (ajustable)
         x_fin = 190
         ancho_celda = 80
 
         # --- Sistema solar FV ---
-        self.set_font('Roboto', '', 14) # Estilo normal
-        self.set_xy(x_fin - ancho_celda, 70) # Coordenada Y estimada
-        self.cell(w=ancho_celda, txt=datos.get("Valor Sistema FV (sin IVA)", "$ 0"), align='R')
+        self.set_font('Roboto', '', 14)
+        self.set_xy(x_fin - ancho_celda, 70)
+        val_sistema = self._format_currency(datos.get("Valor Sistema FV (sin IVA)", "0"))
+        self.cell(w=ancho_celda, txt=val_sistema, align='R')
 
         # --- IVA ---
-        self.set_font('Roboto', 'B', 14) # Estilo negrita
-        self.set_xy(x_fin - ancho_celda, 96) # Coordenada Y estimada
-        self.cell(w=ancho_celda, txt=datos.get("Valor IVA", "$ 0"), align='R')
+        self.set_font('Roboto', 'B', 14)
+        self.set_xy(x_fin - ancho_celda, 96)
+        val_iva = self._format_currency(datos.get("Valor IVA", "0"))
+        self.cell(w=ancho_celda, txt=val_iva, align='R')
         
         # --- Total con IVA ---
-        self.set_font('Roboto', 'B', 14) # Estilo negrita
-        self.set_xy(x_fin - ancho_celda, 106) # Coordenada Y estimada
-        self.cell(w=ancho_celda, txt=datos.get("Valor Total del Proyecto (COP)", "$ 0"), align='R')
+        self.set_font('Roboto', 'B', 14)
+        self.set_xy(x_fin - ancho_celda, 106)
+        val_total = self._format_currency(datos.get("Valor Total del Proyecto (COP)", "0"))
+        self.cell(w=ancho_celda, txt=val_total, align='R')
         
         # --- O&M (Operation & Maintenance) ---
-        self.set_font('Roboto', 'B', 14) # Estilo normal
-        self.set_xy(x_fin - ancho_celda, 115) # Coordenada Y estimada (10mm debajo del total)
-        self.cell(w=ancho_celda, txt=datos.get("O&M (Operation & Maintenance)", "$ 0"), align='R')
+        self.set_font('Roboto', 'B', 14)
+        self.set_xy(x_fin - ancho_celda, 115)
+        val_om = self._format_currency(datos.get("O&M (Operation & Maintenance)", "0"))
+        self.cell(w=ancho_celda, txt=val_om, align='R')
     
     def crear_pagina_aspectos_1(self):
         self.add_page()
@@ -280,47 +296,55 @@ class PropuestaPDF(FPDF):
         self.add_page()
         self.image('assets/fin.jpg', x=0, y=0, w=210)
         
-        self.set_text_color(0, 0, 0) # Texto negro
+        self.set_text_color(*self.TEXT_COLOR)
         
-        # --- Posicionamos los datos de financiación (Coordenadas estimadas) ---
-        
-        # Anticipo (Desembolso Inicial) - formato simplificado
+        # Anticipo (Desembolso Inicial)
         self.set_font('Roboto', 'B', 35)
         self.set_xy(42, 56)
         desembolso_str = datos.get("Desembolso Inicial (COP)", "0")
-        desembolso_valor = float(desembolso_str.replace("$", "").replace(",", "")) if desembolso_str != "0" else 0
+        try:
+            desembolso_valor = float(desembolso_str.replace("$", "").replace(",", ""))
+        except:
+            desembolso_valor = 0
         desembolso_millones = desembolso_valor / 1000000
         self.cell(w=50, txt=f"{desembolso_millones:.1f}", align='C')
 
-        # Cuota Mensual - formato simplificado
+        # Cuota Mensual
         self.set_font('Roboto', 'B', 35)
         self.set_xy(42, 94)
         cuota_str = datos.get("Cuota Mensual del Credito (COP)", "0")
-        cuota_valor = float(cuota_str.replace("$", "").replace(",", "")) if cuota_str != "0" else 0
+        try:
+            cuota_valor = float(cuota_str.replace("$", "").replace(",", ""))
+        except:
+            cuota_valor = 0
         cuota_millones = cuota_valor / 1000000
         self.cell(w=50, txt=f"{cuota_millones:.1f}", align='C')
 
-        # Ahorro Mensual - calcular como promedio de generación año 1 × precio del kWh
+        # Ahorro Mensual
         self.set_font('Roboto', 'B', 35)
         self.set_xy(42, 132)
         ahorro_anual_str = datos.get("Ahorro Estimado Primer Ano (COP)", "0")
-        ahorro_anual_valor = float(ahorro_anual_str.replace("$", "").replace(",", "")) if ahorro_anual_str != "0" else 0
+        try:
+            ahorro_anual_valor = float(ahorro_anual_str.replace("$", "").replace(",", ""))
+        except:
+            ahorro_anual_valor = 0
         ahorro_mensual_calculado = ahorro_anual_valor / 12
         ahorro_millones = ahorro_mensual_calculado / 1000000
         self.cell(w=50, txt=f"{ahorro_millones:.1f}", align='C')
         
         # --- Variables adicionales ---
-        # Obtener plazo del crédito real (en meses)
         plazo_credito = datos.get("Plazo del Crédito", "0")
-        # Vida útil = plazo del crédito en años (convertir meses a años)
-        vida_util = str(int(plazo_credito) // 12) if plazo_credito != "0" else "0"
+        try:
+            vida_util = str(int(plazo_credito) // 12)
+        except:
+            vida_util = "0"
         
         # Plazo del crédito
         self.set_font('Roboto', 'B', 15)
         self.set_xy(104,191)
         self.cell(w=50, txt=str(plazo_credito), align='C')
         
-        # Vida útil del proyecto (igual al plazo del crédito)
+        # Vida útil del proyecto
         self.set_font('Roboto', 'B', 15)
         self.set_xy(19,214)
         self.cell(w=50, txt=str(vida_util), align='C')
