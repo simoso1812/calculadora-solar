@@ -26,6 +26,9 @@ from src.utils.pdf_generator import PropuestaPDF
 from src.utils.contract_generator import generar_contrato_docx
 from src.utils.chargers import generar_pdf_cargadores
 from src.utils.helpers import validar_datos_entrada, formatear_moneda
+from src.utils.plotting import generar_grafica_generacion
+
+
 
 def render_desktop_interface():
     """Interfaz optimizada para desktop"""
@@ -615,6 +618,9 @@ def render_desktop_interface():
                 # Lista de Materiales
                 lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta, module, recomendacion_inversor)
 
+                # --- GENERAR GRÁFICA PARA PDF ---
+                generar_grafica_generacion(monthly_generation, Load, incluir_baterias)
+
                 # Generación de Documentos
                 lat, lon = None, None
                 if st.session_state.map_state.get("marker"):
@@ -887,38 +893,10 @@ def render_desktop_interface():
              if os.path.exists("static_map.png"):
                  st.image("static_map.png", caption="Ubicación del Proyecto")
 
-        fig1, ax1 = plt.subplots(figsize=(10, 5))
-        meses_grafico = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
-        
-        if res['incluir_baterias']:
-            generacion_autoconsumida = []
-            energia_a_bateria = []
-            for gen_mes in res['monthly_generation']:
-                autoconsumo_mes = min(gen_mes, res['Load'])
-                bateria_mes = max(0, gen_mes - autoconsumo_mes)
-                generacion_autoconsumida.append(autoconsumo_mes)
-                energia_a_bateria.append(bateria_mes)
-            
-            ax1.bar(meses_grafico, generacion_autoconsumida, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
-            ax1.bar(meses_grafico, energia_a_bateria, bottom=generacion_autoconsumida, color='green', edgecolor='black', label='Energía Almacenada en Batería', width=0.7)
-            ax1.axhline(y=res['Load'], color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
-            ax1.set_title("Flujo de Energía Mensual Estimado (Off-Grid)", fontweight="bold")
+        if os.path.exists("grafica_generacion.png"):
+            st.image("grafica_generacion.png", caption="Generación Mensual Estimada", use_container_width=True)
         else:
-            generacion_autoconsumida_on, excedentes_vendidos, importado_de_la_red = [], [], []
-            for gen_mes in res['monthly_generation']:
-                if gen_mes >= res['Load']:
-                    generacion_autoconsumida_on.append(res['Load']); excedentes_vendidos.append(gen_mes - res['Load']); importado_de_la_red.append(0)
-                else:
-                    generacion_autoconsumida_on.append(gen_mes); excedentes_vendidos.append(0); importado_de_la_red.append(res['Load'] - gen_mes)
-            
-            ax1.bar(meses_grafico, generacion_autoconsumida_on, color='orange', edgecolor='black', label='Generación Autoconsumida', width=0.7)
-            ax1.bar(meses_grafico, excedentes_vendidos, bottom=generacion_autoconsumida_on, color='red', edgecolor='black', label='Excedentes Vendidos', width=0.7)
-            ax1.bar(meses_grafico, importado_de_la_red, bottom=generacion_autoconsumida_on, color='#2ECC71', edgecolor='black', label='Importado de la Red', width=0.7)
-            ax1.axhline(y=res['Load'], color='grey', linestyle='--', linewidth=1.5, label='Consumo Mensual')
-            ax1.set_title("Generación Vs. Consumo Mensual (On-Grid)", fontweight="bold")
-        
-        ax1.legend()
-        st.pyplot(fig1)
+            st.warning("No se encontró la gráfica de generación.")
 
         fig2, ax2 = plt.subplots(figsize=(10, 5))
         fcl_acumulado = np.cumsum(res['fcl'])

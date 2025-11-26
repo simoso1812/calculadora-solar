@@ -47,6 +47,16 @@ def generate_sample_pdf():
     lat = 4.6097
     lon = -74.0817
 
+    # Generate dummy graph using the SHARED utility
+    from src.utils.plotting import generar_grafica_generacion
+    
+    # Create realistic dummy data for the graph
+    Load = 500
+    monthly_generation = [400, 450, 500, 550, 600, 650, 600, 550, 500, 450, 400, 350]
+    incluir_baterias = False
+    
+    generar_grafica_generacion(monthly_generation, Load, incluir_baterias)
+
     try:
         pdf_bytes = pdf.generar(dummy_data, usa_financiamiento=True, lat=lat, lon=lon)
         
@@ -59,6 +69,10 @@ def generate_sample_pdf():
         print(f"Error generating PDF: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Clean up
+        if os.path.exists("grafica_generacion.png"):
+            os.remove("grafica_generacion.png")
 
 if __name__ == "__main__":
     generate_sample_pdf()
