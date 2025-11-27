@@ -177,7 +177,7 @@ def calcular_performance_ratio(clima, cubierta):
     """
     Calcula el Performance Ratio (PR) del sistema basado en el clima y tipo de cubierta.
     """
-    PR_BASE = 0.85  # Nuevo PR base más optimista
+    PR_BASE = 0.75  # Nuevo PR base más conservador (antes 0.85)
 
     # Ajuste por clima
     clima_upper = clima.strip().upper()
