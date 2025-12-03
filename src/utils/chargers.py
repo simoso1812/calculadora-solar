@@ -14,12 +14,16 @@ def cotizacion_cargadores_costos(distancia_metros: float):
     """
     try:
         costo_base = (63640 * float(distancia_metros) + 857195) * 1.1
-        iva = 0.19 * costo_base
+        
+        # Cálculo corregido: Base -> AIU -> Subtotal -> IVA -> Total
+        prima_aiu = costo_base * 0.20
+        subtotal_antes_iva = costo_base + prima_aiu
+        iva = subtotal_antes_iva * 0.19
+        costo_total = subtotal_antes_iva + iva
+        
         diseno = 0.35 * costo_base
         materiales = 0.65 * costo_base
-        costo_total_sin_prima = costo_base + iva
-        prima_aiu = costo_total_sin_prima * 0.20  # Prima extra de 20% para AIU
-        costo_total = costo_total_sin_prima + prima_aiu
+        
         return iva, diseno, materiales, costo_total, costo_base
     except Exception:
         return 0.0, 0.0, 0.0, 0.0, 0.0
