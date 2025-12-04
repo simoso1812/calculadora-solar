@@ -117,9 +117,11 @@ def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float, p
 
     desglose = {
         "Costo Base": costo_base,
-        "IVA": iva,
-        "Diseño": diseno,
-        "Materiales": materiales,
+        "AIU (20%)": subtotal_antes_iva - costo_base,
+        "Subtotal (Base + AIU)": subtotal_antes_iva,
+        "IVA (19% sobre Subtotal)": iva,
+        "Diseño (35% del Base)": diseno,
+        "Materiales (65% del Base)": materiales,
         "Costo Total": costo_total,
     }
 
