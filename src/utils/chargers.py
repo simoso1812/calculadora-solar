@@ -14,22 +14,21 @@ def cotizacion_cargadores_costos(distancia_metros: float, precio_manual: float =
     """
     try:
         if precio_manual and precio_manual > 0:
-            # Cálculo inverso: Total -> Base
-            # Total = Base * 1.20 * 1.19 = Base * 1.428
+            # Cálculo inverso desde el Total
             costo_total = float(precio_manual)
-            costo_base = costo_total / 1.428
+            # Total = Subtotal + IVA = Subtotal * 1.19
+            # Entonces: Subtotal = Total / 1.19
+            subtotal_antes_iva = costo_total / 1.19
+            iva = subtotal_antes_iva * 0.19
+            # El costo_base es el subtotal sin el AIU del 20%
+            costo_base = subtotal_antes_iva / 1.20
         else:
+            # Cálculo normal desde la distancia
             costo_base = (63640 * float(distancia_metros) + 857195) * 1.1
-            
-        # Cálculo: Base -> AIU -> Subtotal -> IVA -> Total
-        prima_aiu = costo_base * 0.20
-        subtotal_antes_iva = costo_base + prima_aiu
-        iva = subtotal_antes_iva * 0.19
-        
-        if precio_manual and precio_manual > 0:
-             costo_total = float(precio_manual) # Asegurar que sea exacto
-        else:
-             costo_total = subtotal_antes_iva + iva
+            prima_aiu = costo_base * 0.20
+            subtotal_antes_iva = costo_base + prima_aiu
+            iva = subtotal_antes_iva * 0.19
+            costo_total = subtotal_antes_iva + iva
         
         # Para el PDF, distribuir el AIU en diseño y materiales proporcionalmente
         # Así: Diseño + Materiales = Subtotal (transparente para clientes)
