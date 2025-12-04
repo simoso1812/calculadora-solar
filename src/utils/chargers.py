@@ -34,9 +34,9 @@ def cotizacion_cargadores_costos(distancia_metros: float, precio_manual: float =
         diseno = 0.35 * costo_base
         materiales = 0.65 * costo_base
         
-        return iva, diseno, materiales, costo_total, costo_base
+        return iva, diseno, materiales, costo_total, costo_base, subtotal_antes_iva
     except Exception:
-        return 0.0, 0.0, 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
 
 def calcular_materiales_cargador(distancia_metros: float):
@@ -60,7 +60,7 @@ def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float, p
     plantilla_path = os.path.join("assets", "Plantilla_MIRAC_CARGADORES.pdf")
     fecha_actual = datetime.datetime.now().strftime("%d-%m-%Y")
 
-    iva, diseno, materiales, costo_total, costo_base = cotizacion_cargadores_costos(distancia_metros, precio_manual)
+    iva, diseno, materiales, costo_total, costo_base, subtotal_antes_iva = cotizacion_cargadores_costos(distancia_metros, precio_manual)
 
     # PDFs temporales en memoria
     temp1 = BytesIO()
