@@ -31,8 +31,10 @@ def cotizacion_cargadores_costos(distancia_metros: float, precio_manual: float =
         else:
              costo_total = subtotal_antes_iva + iva
         
-        diseno = 0.35 * costo_base
-        materiales = 0.65 * costo_base
+        # Para el PDF, distribuir el AIU en diseño y materiales proporcionalmente
+        # Así: Diseño + Materiales = Subtotal (transparente para clientes)
+        diseno = 0.35 * subtotal_antes_iva  # 35% del subtotal (incluye AIU)
+        materiales = 0.65 * subtotal_antes_iva  # 65% del subtotal (incluye AIU)
         
         return iva, diseno, materiales, costo_total, costo_base, subtotal_antes_iva
     except Exception:
