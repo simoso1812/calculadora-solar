@@ -85,9 +85,9 @@ def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float, p
     c2.drawString(465, 576 + offset_y, f"${diseno:,.0f}")
     c2.drawString(465, 551 + offset_y, f"${materiales:,.0f}")
     
-    # Subtotal = Diseño + Materiales (más claro para clientes)
-    subtotal_pdf = diseno + materiales
-    c2.drawString(465, 500 + offset_y, f"${subtotal_pdf:,.0f}")
+    # Subtotal = Base + AIU (para que el IVA cuadre)
+    # Esto es lo que realmente se usa para calcular el IVA
+    c2.drawString(465, 500 + offset_y, f"${subtotal_antes_iva:,.0f}")
     c2.drawString(465, 474 + offset_y, f"${iva:,.0f}")
     c2.drawString(465, 448 + offset_y, f"${costo_total:,.0f}")
     c2.save()
