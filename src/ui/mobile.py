@@ -687,8 +687,14 @@ def render_tab_cargadores_mobile():
     nombre_lugar = st.text_input("Nombre del Cliente/Lugar (Cargadores)", key="nombre_cargador_mobile")
     distancia = st.number_input("Distancia (metros)", min_value=1.0, value=10.0, step=1.0, key="dist_cargador_mobile")
     
+    # Opción de precio manual para cargadores
+    precio_manual_cargador = st.checkbox("Precio Manual (Cargadores)", key="precio_manual_cargador_mobile")
+    precio_valor_cargador = None
+    if precio_manual_cargador:
+        precio_valor_cargador = st.number_input("Precio Manual del Cargador (COP)", min_value=100000, value=2500000, step=50000, key="precio_valor_cargador_mobile")
+    
     if st.button("Calcular Cargador", use_container_width=True):
-        pdf_bytes, desglose = generar_pdf_cargadores(nombre_lugar, distancia)
+        pdf_bytes, desglose = generar_pdf_cargadores(nombre_lugar, distancia, precio_valor_cargador)
         if pdf_bytes:
             st.subheader("Desglose de Costos")
             st.write(desglose)

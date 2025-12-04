@@ -8,18 +8,28 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from PyPDF2 import PdfReader, PdfWriter
 
-def cotizacion_cargadores_costos(distancia_metros: float):
+def cotizacion_cargadores_costos(distancia_metros: float, precio_manual: float = None):
     """Calcula desglose de costos para instalación de un punto de carga.
     Retorna (IVA, diseño, materiales, costo_total, costo_base).
     """
     try:
-        costo_base = (63640 * float(distancia_metros) + 857195) * 1.1
-        
-        # Cálculo corregido: Base -> AIU -> Subtotal -> IVA -> Total
+        if precio_manual and precio_manual > 0:
+            # Cálculo inverso: Total -> Base
+            # Total = Base * 1.20 * 1.19 = Base * 1.428
+            costo_total = float(precio_manual)
+            costo_base = costo_total / 1.428
+        else:
+            costo_base = (63640 * float(distancia_metros) + 857195) * 1.1
+            
+        # Cálculo: Base -> AIU -> Subtotal -> IVA -> Total
         prima_aiu = costo_base * 0.20
         subtotal_antes_iva = costo_base + prima_aiu
         iva = subtotal_antes_iva * 0.19
-        costo_total = subtotal_antes_iva + iva
+        
+        if precio_manual and precio_manual > 0:
+             costo_total = float(precio_manual) # Asegurar que sea exacto
+        else:
+             costo_total = subtotal_antes_iva + iva
         
         diseno = 0.35 * costo_base
         materiales = 0.65 * costo_base
@@ -44,13 +54,13 @@ def calcular_materiales_cargador(distancia_metros: float):
     return lista
 
 
-def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float):
+def generar_pdf_cargadores(nombre_cliente_lugar: str, distancia_metros: float, precio_manual: float = None):
     """Genera el PDF de cotización de cargadores usando la plantilla en assets y retorna (bytes_pdf, desglose_dict)."""
     
     plantilla_path = os.path.join("assets", "Plantilla_MIRAC_CARGADORES.pdf")
     fecha_actual = datetime.datetime.now().strftime("%d-%m-%Y")
 
-    iva, diseno, materiales, costo_total, costo_base = cotizacion_cargadores_costos(distancia_metros)
+    iva, diseno, materiales, costo_total, costo_base = cotizacion_cargadores_costos(distancia_metros, precio_manual)
 
     # PDFs temporales en memoria
     temp1 = BytesIO()

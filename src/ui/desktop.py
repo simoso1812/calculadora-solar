@@ -484,9 +484,16 @@ def render_desktop_interface():
         st.subheader("🔌 Cotizador de Cargadores")
         ev_nombre = st.text_input("Cliente y Lugar (Cargadores)", "")
         ev_dist = st.number_input("Distancia parqueadero a subestación (m)", min_value=1.0, value=10.0, step=1.0)
+        
+        # Opción de precio manual para cargadores
+        ev_precio_manual = st.checkbox("Precio Manual (Cargadores)", key="ev_precio_manual_desktop")
+        ev_precio_valor = None
+        if ev_precio_manual:
+            ev_precio_valor = st.number_input("Precio Manual del Cargador (COP)", min_value=100000, value=2500000, step=50000, key="ev_precio_valor_desktop")
+
         if st.button("Generar PDF Cargadores", use_container_width=True, key="ev_gen_desktop"):
             try:
-                ev_pdf, ev_desglose = generar_pdf_cargadores(ev_nombre or "Cliente", ev_dist)
+                ev_pdf, ev_desglose = generar_pdf_cargadores(ev_nombre or "Cliente", ev_dist, ev_precio_valor)
                 st.success("✅ Cotización de Cargadores generada")
                 col_ev1, col_ev2 = st.columns(2)
                 with col_ev1:
