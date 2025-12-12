@@ -4,6 +4,7 @@ Utilidad para generar el PDF de la propuesta solar.
 from fpdf import FPDF
 import datetime
 import os
+import math
 import streamlit as st
 
 class PropuestaPDF(FPDF):
@@ -31,13 +32,23 @@ class PropuestaPDF(FPDF):
 
     def _format_currency(self, value):
         """Formatea valores monetarios."""
+        def _ceil_to_100(amount: float) -> float:
+            # Redondeo comercial hacia arriba a la centena más cercana (COP)
+            # Mantiene consistencia entre flujos (desktop/mobile) y evita decimales.
+            try:
+                return float(math.ceil(amount / 100.0) * 100)
+            except Exception:
+                return 0.0
+
         if isinstance(value, (int, float)):
-            return f"$ {value:,.0f}"
+            rounded = _ceil_to_100(float(value))
+            return f"$ {rounded:,.0f}"
         if isinstance(value, str):
             value = value.replace('$', '').replace(',', '').strip()
             try:
                 val_float = float(value)
-                return f"$ {val_float:,.0f}"
+                rounded = _ceil_to_100(val_float)
+                return f"$ {rounded:,.0f}"
             except ValueError:
                 pass
         return "$ 0"
@@ -84,25 +95,31 @@ class PropuestaPDF(FPDF):
         self.set_font(self.font_family, '', 12)
         self.cell(0, 10, self.fecha_propuesta.strftime('%d/%m/%Y'))
 
-    def crear_indice(self):
-        self.add_page()
-        self.image('assets/2.jpg', x=0, y=0, w=210)
-
     def crear_resumen_ejecutivo(self, datos):
         self.add_page()
         self.image('assets/3.jpg', x=0, y=0, w=210)
         self.set_text_color(*self.TEXT_COLOR)
+        
+        # Definir color amarillo MIRAC
+        YELLOW_MIRAC = (250, 193, 7)  # Amarillo similar al de la marca
 
-        # --- 1. Bloque de Ahorro Anual (redondeado a entero en millones) ---
-        valor_ahorro_str = datos.get('Ahorro Estimado Primer Ano (COP)', '0').replace(',', '').replace('$', '')
-        try:
-            valor_ahorro_millones = float(valor_ahorro_str) / 1000000
-            valor_ahorro_entero = int(round(valor_ahorro_millones))
-        except:
-            valor_ahorro_entero = 0
+        # --- 1. Bloque de kWp instalados ---
+        kwp_instalados = datos.get('Tamano del Sistema (kWp)', '0')
+        kwp_formatted = self._format_number(kwp_instalados, decimals=1)
+        
         self.set_font(self.font_family, 'B', 40)
-        self.set_xy(52, 58)
-        self.cell(w=30, text=str(valor_ahorro_entero), align='L')
+        self.set_xy(36, 60)
+        self.set_text_color(*self.TEXT_COLOR)
+        
+        # Calculate width of number to place 'k' immediately after
+        w_num = self.get_string_width(kwp_formatted)
+        self.cell(w=w_num + 2, text=kwp_formatted, align='L')
+        
+        # Agregar "kWp" con la "k" en amarillo y "Wp" en negro
+        self.set_text_color(*YELLOW_MIRAC)
+        self.cell(w=10, text="k", align='L')
+        self.set_text_color(*self.TEXT_COLOR)
+        self.cell(w=35, text="Wp", align='L')
 
         # --- 2. Bloque de Cantidad de Módulos Fotovoltaicos ---
         cantidad_paneles = datos.get('Cantidad de Paneles', '0')
@@ -112,7 +129,8 @@ class PropuestaPDF(FPDF):
         cantidad_num = self._format_number(cantidad_paneles)
         
         self.set_font(self.font_family, 'B', 40)
-        self.set_xy(51, 105)
+        self.set_xy(49, 106)
+        self.set_text_color(*self.TEXT_COLOR)
         self.cell(w=30, text=cantidad_num, align='L')
 
         # --- 3. Bloque de Número de Árboles ---
@@ -123,7 +141,8 @@ class PropuestaPDF(FPDF):
         arboles_num = self._format_number(valor_arboles)
         
         self.set_font(self.font_family, 'B', 40)
-        self.set_xy(51, 153)
+        self.set_xy(38, 152)
+        self.set_text_color(*self.TEXT_COLOR)
         self.cell(w=30, text=arboles_num, align='L')
 
         # --- 4. Bloque de Toneladas de CO2 Evitadas ---
@@ -131,27 +150,17 @@ class PropuestaPDF(FPDF):
         co2_formatted = self._format_number(co2_tons, decimals=1)
         
         self.set_font(self.font_family, 'B', 40)
-        self.set_xy(16, 189)
-        self.cell(w=30, text=co2_formatted, align='L')
-    
-    def crear_detalle_sistema(self, datos):
-        self.add_page()
-        self.image('assets/4.jpg', x=0, y=0, w=210)
-        
-        cantidad_paneles = str(datos.get('Cantidad de Paneles', 'XX').split(' ')[0])
-
-        # --- 1. Número grande al lado de la 'x' ---
-        self.set_xy(43, 76) 
-        self.set_font(self.font_family, 'B', 45)
-        self.set_text_color(*self.TEXT_COLOR) 
-        self.cell(w=30, txt=cantidad_paneles, align='L')
-
-        # --- 2. Número pequeño dentro del párrafo ---
-        self.set_xy(34, 117) 
+        self.set_xy(25, 191)
         self.set_text_color(*self.TEXT_COLOR)
-        self.set_font('Roboto', '', 15) 
-        self.cell(w=10, txt=cantidad_paneles, align='C')
-
+        
+        # Draw number and unit together to avoid overlap
+        w_co2 = self.get_string_width(co2_formatted)
+        self.cell(w=w_co2 + 2, text=co2_formatted, align='L')
+        
+        # Agregar "Ton" en amarillo MIRAC
+        self.set_text_color(*YELLOW_MIRAC)
+        self.cell(w=50, text="Ton", align='L')
+    
     def crear_pagina_generacion_mensual(self, datos):
         self.add_page()
         self.image('assets/5.jpg', x=0, y=0, w=210)
@@ -164,13 +173,19 @@ class PropuestaPDF(FPDF):
             self.image('grafica_generacion.png', x=x_grafica, y=y_grafica, w=ancho_grafica)
         
         # --- 2. Escribir solo el número de la generación promedio ---
-        self.set_xy(86, 97)
+        self.set_xy(86, 98)
         self.set_text_color(*self.TEXT_COLOR)
         self.set_font('Roboto', 'B', 15)
         
         valor_generacion = datos.get('Generacion Promedio Mensual (kWh)', '0')
         formatted_gen = self._format_number(valor_generacion)
-        self.cell(w=30, txt=formatted_gen, align='L')
+
+        # Imprimir número + unidad "kWh" (solicitado)
+        w_num = self.get_string_width(formatted_gen)
+        self.cell(w=w_num + 1, txt=formatted_gen, align='L')
+        # Misma fuente/tamaño que el número
+        self.set_font('Roboto', 'B', 15)
+        self.cell(w=0, txt=" kWh", align='L')
     
     def crear_pagina_ubicacion(self, lat, lon):
         self.add_page()
@@ -270,17 +285,114 @@ class PropuestaPDF(FPDF):
         val_om = self._format_currency(datos.get("O&M (Operation & Maintenance)", "0"))
         self.cell(w=ancho_celda, txt=val_om, align='R')
     
-    def crear_pagina_aspectos_1(self):
-        self.add_page()
-        self.image('assets/10.jpg', x=0, y=0, w=210)
+    def _format_large_money(self, value_str):
+        """Formatea valor monetario a corto (7.9M, 638k) y devuelve tupla (valor, sufijo)."""
+        try:
+            val_float = float(str(value_str).replace('$', '').replace(',', '').strip())
+        except:
+            return "0", ""
+            
+        if val_float >= 1000000:
+            val = val_float / 1000000
+            return f"{val:.1f}", "M"
+        elif val_float >= 1000:
+            val = val_float / 1000
+            return f"{val:.1f}", "k"
         
-    def crear_pagina_aspectos_2(self):
+        return f"{int(val_float)}", ""
+
+    def crear_pagina_info_financiera(self, datos):
+        """Página de Resumen Financiero con TIR, ahorro, O&M y deducible."""
         self.add_page()
-        self.image('assets/11.jpg', x=0, y=0, w=210)
+        self.image('assets/info_financiera.jpg', x=0, y=0, w=210)
         
-    def crear_pagina_aspectos_3(self):
+        YELLOW_MIRAC = (250, 193, 7)
+        X_ALIGN = 25  # Alineación vertical común
+        
+        # --- 1. TIR (Tasa Interna de Retorno) ---
+        tir_str = datos.get('TIR (Tasa Interna de Retorno)', '0%')
+        tir_val = tir_str.replace('%', '').strip()
+        
+        # Posición TIR
+        self.set_xy(46, 68) 
+        self.set_font(self.font_family, 'B', 40)
+        self.set_text_color(*self.TEXT_COLOR)
+        
+        # "TIR"
+        self.cell(w=self.get_string_width("TIR ") + 2, txt="TIR ", align='L')
+        # Valor
+        self.cell(w=self.get_string_width(tir_val) + 2, txt=tir_val, align='L')
+        # "%" en amarillo
+        self.set_text_color(*YELLOW_MIRAC)
+        self.cell(w=15, txt="%", align='L')
+        
+        # --- 2. Tiempo de retorno (años) ---
+        # --- 2. Tiempo de retorno (años) ---
+        periodo_retorno = datos.get('Periodo de Retorno (anos)', '0')
+        self.set_font('Roboto', 'B', 15) # Texto resaltado dentro del párrafo del background
+        self.set_text_color(*self.TEXT_COLOR)
+        # Ajustamos posición para caer justo donde debería ir el número en la plantilla
+        # Asumiendo que el texto "Tiempo de retorno..." ya está impreso en la imagen
+        self.set_xy(153, 74) 
+        self.cell(w=30, h=6, txt=f"{self._format_number(periodo_retorno, decimals=1)} años", align='R')
+
+        # --- Base font setup for values ---
+        self.set_font(self.font_family, 'B', 40)
+        
+        # --- 3. Ahorro anual aproximado ---
+        ahorro_raw = datos.get('Ahorro Estimado Primer Ano (COP)', '0')
+        val, suffix = self._format_large_money(ahorro_raw)
+        
+        target_y_1 = 107
+        self.set_xy(X_ALIGN, target_y_1)
+        
+        self.set_text_color(*self.TEXT_COLOR)
+        self.cell(w=10, txt="$ ", align='L')
+        self.cell(w=self.get_string_width(val) + 2, txt=val, align='L')
+        self.set_text_color(*YELLOW_MIRAC)
+        self.cell(w=10, txt=suffix, align='L')
+        
+        # --- 4. Precio anual O&M ---
+        om_raw = datos.get('O&M (Operation & Maintenance)', '0')
+        val_om, suffix_om = self._format_large_money(om_raw)
+        
+        target_y_2 = 148  # Subido un poco respecto a 163
+        self.set_xy(X_ALIGN, target_y_2)
+        
+        self.set_text_color(*self.TEXT_COLOR)
+        self.cell(w=10, txt="$ ", align='L')
+        self.cell(w=self.get_string_width(val_om) + 2, txt=val_om, align='L')
+        self.set_text_color(*YELLOW_MIRAC)
+        self.cell(w=10, txt=suffix_om, align='L')
+        
+        # --- 5. Deducible impuesto de renta ---
+        valor_sistema_str = datos.get('Valor Sistema FV (sin IVA)', '0')
+        try:
+            valor_sistema = float(str(valor_sistema_str).replace('$', '').replace(',', '').strip())
+            deducible = valor_sistema * 0.44
+        except:
+            deducible = 0
+            
+        val_ded, suffix_ded = self._format_large_money(deducible)
+        
+        target_y_3 = 187 # Subido significativamente de 213 (estaba muy abajo)
+        self.set_xy(X_ALIGN, target_y_3) # Movido más a la izquierda (X=25)
+        
+        self.set_text_color(*self.TEXT_COLOR)
+        self.cell(w=10, txt="$ ", align='L')
+        self.cell(w=self.get_string_width(val_ded) + 2, txt=val_ded, align='L')
+        self.set_text_color(*YELLOW_MIRAC)
+        self.cell(w=10, txt=suffix_ded, align='L')
+    
+    def crear_pagina_aspectos_a(self):
+        """Primera página de aspectos (reemplaza aspectos 1, 2, 3)."""
         self.add_page()
-        self.image('assets/12.jpg', x=0, y=0, w=210)
+        self.image('assets/aspectos_a.jpg', x=0, y=0, w=210)
+        
+    def crear_pagina_aspectos_b(self):
+        """Segunda página de aspectos (reemplaza aspectos 1, 2, 3)."""
+        self.add_page()
+        self.image('assets/aspectos_b.jpg', x=0, y=0, w=210)
         
     def crear_pagina_proyectos(self):
         self.add_page()
@@ -352,25 +464,38 @@ class PropuestaPDF(FPDF):
     def generar(self, datos_calculadora, usa_financiamiento, lat=None, lon=None):
         """
         Llama a todos los métodos en orden para construir el documento.
+        
+        Nueva estructura:
+        1. Portada
+        2. Resumen Ejecutivo (kWp, módulos, árboles, CO2)
+        3. Generación Mensual
+        4. Ubicación
+        5. Ficha Técnica
+        6. Alcance
+        7. Términos/Costos
+        8. Info Financiera (TIR, ahorro, O&M, deducible)
+        9. Financiación (si aplica)
+        10. Aspectos A
+        11. Aspectos B
+        12. Proyectos
+        13. Contacto
         """
         self.crear_portada()
-        self.crear_indice()
         self.crear_resumen_ejecutivo(datos_calculadora)
-        self.crear_detalle_sistema(datos_calculadora)
         self.crear_pagina_generacion_mensual(datos_calculadora)
         if lat is not None and lon is not None:
             self.crear_pagina_ubicacion(lat, lon)
         self.crear_pagina_tecnica(datos_calculadora)
         self.crear_pagina_alcance()
         self.crear_pagina_terminos(datos_calculadora)
+        self.crear_pagina_info_financiera(datos_calculadora)
         
         # Página de financiación solo si se requiere
         if usa_financiamiento:
             self.crear_pagina_financiacion(datos_calculadora)
         
-        self.crear_pagina_aspectos_1()
-        self.crear_pagina_aspectos_2()
-        self.crear_pagina_aspectos_3()
+        self.crear_pagina_aspectos_a()
+        self.crear_pagina_aspectos_b()
         self.crear_pagina_proyectos()
         self.crear_pagina_contacto()
     
