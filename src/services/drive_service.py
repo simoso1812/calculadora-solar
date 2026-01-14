@@ -71,7 +71,7 @@ def subir_docx_a_drive(service, id_carpeta_destino, nombre_archivo, docx_bytes):
         file_metadata = {'name': nombre_archivo, 'parents': [id_carpeta_destino]}
         media = MediaIoBaseUpload(io.BytesIO(docx_bytes), mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
         service.files().create(body=file_metadata, media_body=media, fields='id', supportsAllDrives=True).execute()
-        st.info(f"📄 Contrato guardado en la carpeta 'Permisos y Legal'.")
+        st.info(f"📄 Contrato guardado en la carpeta 'Propuesta y Contratación'.")
     except Exception as e:
         st.error(f"Error al subir el contrato a Google Drive: {e}")
 
@@ -97,14 +97,14 @@ def gestionar_creacion_drive(service, parent_folder_id, nombre_proyecto, pdf_byt
                 else:
                     st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion' para guardar el PDF.")
             with st.spinner("Buscando carpeta de destino para el contrato..."):
-             query_contrato = f"'{id_carpeta_principal_nueva}' in parents and name='04_Permisos_y_Legal'"
-             results_contrato = service.files().list(q=query_contrato, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-             items_contrato = results_contrato.get('files', [])
-             if items_contrato:
-                id_carpeta_contrato = items_contrato[0].get('id')
-                subir_docx_a_drive(service, id_carpeta_contrato, nombre_contrato, contrato_bytes)
-             else:
-                st.warning("No se encontró la subcarpeta '04_Permisos_y_Legal'.")
+                query_contrato = f"'{id_carpeta_principal_nueva}' in parents and name='01_Propuesta_y_Contratacion'"
+                results_contrato = service.files().list(q=query_contrato, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+                items_contrato = results_contrato.get('files', [])
+                if items_contrato:
+                    id_carpeta_contrato = items_contrato[0].get('id')
+                    subir_docx_a_drive(service, id_carpeta_contrato, nombre_contrato, contrato_bytes)
+                else:
+                    st.warning("No se encontró la subcarpeta '01_Propuesta_y_Contratacion'.")
         return folder.get('webViewLink')
     except Exception as e:
         st.error(f"Error en el proceso de Google Drive: {e}")
