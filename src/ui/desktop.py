@@ -14,8 +14,9 @@ import folium
 from streamlit_folium import st_folium
 import googlemaps
 from src.config import HSP_MENSUAL_POR_CIUDAD, PROMEDIOS_COSTO, HSP_POR_CIUDAD
+from src.config_parametros import DEFAULT_PARAMS, PARAM_DESCRIPTIONS, PARAM_LIMITS, get_param
 from src.services.calculator_service import (
-    cotizacion, calcular_costo_por_kwp, generar_csv_flujo_caja_detallado, 
+    cotizacion, calcular_costo_por_kwp, generar_csv_flujo_caja_detallado,
     calcular_analisis_sensibilidad, calcular_lista_materiales, redondear_a_par
 )
 from src.services.drive_service import obtener_siguiente_consecutivo, gestionar_creacion_drive
@@ -330,6 +331,80 @@ def render_desktop_interface():
             st.info("📊 **Análisis de Sostenibilidad Activado**: Se calcularán las emisiones de carbono evitadas, equivalencias ambientales y valor de certificación.")
 
         st.markdown("---")
+        st.subheader("⚙️ Parámetros Avanzados")
+        usar_params_personalizados = st.toggle(
+            "⚙️ Personalizar parámetros de cálculo",
+            help="Permite ajustar parámetros como precio de excedentes, tasa de degradación y mantenimiento",
+            key="params_avanzados_desktop"
+        )
+
+        # Inicializar custom_params
+        custom_params = None
+        if usar_params_personalizados:
+            st.info("💡 **Parámetros Avanzados**: Ajusta los valores según las condiciones específicas del proyecto")
+
+            custom_params = {}
+
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                custom_params["precio_excedentes"] = st.number_input(
+                    "Precio venta excedentes (COP/kWh)",
+                    min_value=0,
+                    max_value=2000,
+                    value=int(DEFAULT_PARAMS["precio_excedentes"]),
+                    step=10,
+                    help=PARAM_DESCRIPTIONS["precio_excedentes"],
+                    key="precio_excedentes_desktop"
+                )
+
+                tasa_deg_pct = st.number_input(
+                    "Tasa degradación anual (%)",
+                    min_value=0.01,
+                    max_value=1.0,
+                    value=DEFAULT_PARAMS["tasa_degradacion_anual"] * 100,
+                    step=0.01,
+                    format="%.2f",
+                    help=PARAM_DESCRIPTIONS["tasa_degradacion_anual"],
+                    key="tasa_degradacion_desktop"
+                )
+                custom_params["tasa_degradacion_anual"] = tasa_deg_pct / 100
+
+            with col_p2:
+                mant_pct = st.number_input(
+                    "Mantenimiento (% del ahorro)",
+                    min_value=0.0,
+                    max_value=15.0,
+                    value=DEFAULT_PARAMS["porcentaje_mantenimiento"] * 100,
+                    step=0.5,
+                    format="%.1f",
+                    help=PARAM_DESCRIPTIONS["porcentaje_mantenimiento"],
+                    key="mantenimiento_desktop"
+                )
+                custom_params["porcentaje_mantenimiento"] = mant_pct / 100
+
+                pr_base = st.number_input(
+                    "Performance Ratio base (%)",
+                    min_value=50.0,
+                    max_value=95.0,
+                    value=DEFAULT_PARAMS["performance_ratio_base"] * 100,
+                    step=1.0,
+                    format="%.1f",
+                    help=PARAM_DESCRIPTIONS["performance_ratio_base"],
+                    key="pr_base_desktop"
+                )
+                custom_params["performance_ratio_base"] = pr_base / 100
+
+            with st.expander("📋 Valores actuales vs defaults"):
+                st.markdown(f"""
+                | Parámetro | Valor actual | Default |
+                |-----------|--------------|---------|
+                | Precio excedentes | {custom_params['precio_excedentes']} COP/kWh | {DEFAULT_PARAMS['precio_excedentes']} COP/kWh |
+                | Tasa degradación | {custom_params['tasa_degradacion_anual']*100:.2f}% | {DEFAULT_PARAMS['tasa_degradacion_anual']*100:.2f}% |
+                | Mantenimiento | {custom_params['porcentaje_mantenimiento']*100:.1f}% | {DEFAULT_PARAMS['porcentaje_mantenimiento']*100:.1f}% |
+                | Performance Ratio | {custom_params['performance_ratio_base']*100:.1f}% | {DEFAULT_PARAMS['performance_ratio_base']*100:.1f}% |
+                """)
+
+        st.markdown("---")
         st.subheader("💼 Resumen Financiero para Financieros")
         mostrar_resumen_financiero = st.toggle(
             "💼 Mostrar resumen financiero",
@@ -530,7 +605,7 @@ def render_desktop_interface():
                     cotizacion(Load, size, quantity, cubierta, clima, index_input / 100, dRate_input / 100, costkWh, module,
                                  ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
                                  perc_financiamiento=perc_financiamiento, tasa_interes_credito=tasa_interes_input / 100,
-                                 plazo_credito_años=plazo_credito_años, tasa_degradacion=0.001, precio_excedentes=300.0,
+                                 plazo_credito_años=plazo_credito_años,
                                  incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                                  profundidad_descarga=profundidad_descarga / 100,
                                  eficiencia_bateria=eficiencia_bateria / 100, dias_autonomia=dias_autonomia,
@@ -538,7 +613,8 @@ def render_desktop_interface():
                                  incluir_beneficios_tributarios=incluir_beneficios_tributarios,
                                  incluir_deduccion_renta=incluir_deduccion_renta,
                                  incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
-                                 demora_6_meses=demora_6_meses)
+                                 demora_6_meses=demora_6_meses,
+                                 custom_params=custom_params)
                 
                 # Aplicar precio manual si está activado
                 val_total = valor_proyecto_total
@@ -558,6 +634,10 @@ def render_desktop_interface():
                     desembolso_inicial_cliente = val_total - monto_a_financiar
 
                     # RECALCULAR FLUJO DE CAJA COMPLETO con el precio manual
+                    # Obtener parámetros configurables
+                    precio_excedentes_calc = get_param("precio_excedentes", custom_params)
+                    porcentaje_mant_calc = get_param("porcentaje_mantenimiento", custom_params)
+
                     fcl = []  # Reiniciar flujo de caja
                     for i in range(life):
                         # Calcular ahorro anual para cada año
@@ -568,18 +648,18 @@ def render_desktop_interface():
                             for gen_mes in monthly_generation:
                                 consumo_mes = Load
                                 if gen_mes >= consumo_mes:
-                                    ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                                    ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes_calc)
                                 else:
                                     ahorro_mes = gen_mes * costkWh
                                 ahorro_anual_total += ahorro_mes
-                        
+
                         # Aplicar indexación
                         ahorro_anual_indexado = ahorro_anual_total * ((1 + index_input / 100) ** i)
                         if i == 0:
                             ahorro_año1 = ahorro_anual_total
 
                         # Mantenimiento anual
-                        mantenimiento_anual = 0.05 * ahorro_anual_indexado
+                        mantenimiento_anual = porcentaje_mant_calc * ahorro_anual_indexado
 
                         # Cuotas anuales del crédito
                         cuotas_anuales_credito = 0
@@ -619,7 +699,8 @@ def render_desktop_interface():
                         precio_manual=precio_manual_valor, horizonte_base=horizonte_tiempo,
                         incluir_beneficios_tributarios=incluir_beneficios_tributarios,
                         incluir_deduccion_renta=incluir_deduccion_renta,
-                        incluir_depreciacion_acelerada=incluir_depreciacion_acelerada
+                        incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
+                        custom_params=custom_params
                     )
 
                 # Lista de Materiales

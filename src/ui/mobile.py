@@ -12,6 +12,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from src.config import HSP_MENSUAL_POR_CIUDAD, PROMEDIOS_COSTO, ESTRUCTURA_CARPETAS, HSP_POR_CIUDAD
+from src.config_parametros import DEFAULT_PARAMS, PARAM_DESCRIPTIONS, get_param
 from src.services.pvgis_service import get_pvgis_hsp_alternative
 from src.services.calculator_service import (
     calcular_costo_por_kwp,
@@ -327,6 +328,49 @@ def render_tab_finanzas_mobile():
         key="incluir_carbon_mobile"
     )
 
+    st.subheader("⚙️ Parámetros Avanzados")
+    usar_params_personalizados_mobile = st.toggle(
+        "⚙️ Personalizar parámetros",
+        help="Ajustar precio de excedentes, degradación y mantenimiento",
+        key="params_avanzados_mobile"
+    )
+
+    # Inicializar custom_params para mobile
+    custom_params_mobile = None
+    if usar_params_personalizados_mobile:
+        custom_params_mobile = {}
+
+        custom_params_mobile["precio_excedentes"] = st.number_input(
+            "Precio excedentes (COP/kWh)",
+            min_value=0,
+            max_value=2000,
+            value=int(DEFAULT_PARAMS["precio_excedentes"]),
+            step=10,
+            key="precio_excedentes_mobile"
+        )
+
+        tasa_deg_pct_mobile = st.number_input(
+            "Degradación anual (%)",
+            min_value=0.01,
+            max_value=1.0,
+            value=DEFAULT_PARAMS["tasa_degradacion_anual"] * 100,
+            step=0.01,
+            format="%.2f",
+            key="tasa_degradacion_mobile"
+        )
+        custom_params_mobile["tasa_degradacion_anual"] = tasa_deg_pct_mobile / 100
+
+        mant_pct_mobile = st.number_input(
+            "Mantenimiento (% ahorro)",
+            min_value=0.0,
+            max_value=15.0,
+            value=DEFAULT_PARAMS["porcentaje_mantenimiento"] * 100,
+            step=0.5,
+            format="%.1f",
+            key="mantenimiento_mobile"
+        )
+        custom_params_mobile["porcentaje_mantenimiento"] = mant_pct_mobile / 100
+
     st.subheader("💼 Resumen Financiero para Financieros")
     mostrar_resumen_financiero_mobile = st.toggle(
         "💼 Mostrar resumen financiero",
@@ -354,7 +398,8 @@ def render_tab_finanzas_mobile():
             'mostrar_resumen_financiero_mobile': mostrar_resumen_financiero_mobile,
             'incluir_beneficios_tributarios': incluir_beneficios_tributarios_mobile,
             'tipo_beneficio_tributario': tipo_beneficio_tributario_mobile,
-            'demora_6_meses': demora_6_meses_mobile
+            'demora_6_meses': demora_6_meses_mobile,
+            'custom_params': custom_params_mobile
         }
         st.success("✅ Parámetros financieros guardados")
 
@@ -490,7 +535,8 @@ def render_tab_archivos_mobile():
                 incluir_deduccion_renta = incluir_beneficios_tributarios and tipo_beneficio == 'deduccion_renta'
                 incluir_depreciacion_acelerada = incluir_beneficios_tributarios and tipo_beneficio == 'depreciacion_acelerada'
                 demora_6_meses = fin.get('demora_6_meses', False)
-                
+                custom_params = fin.get('custom_params', None)
+
                 valor_total, size, monto_fin, cuota_mensual, desembolso_ini, flujo_caja, arboles, gen_mensual, vpn, tir, cantidad, vida_util, rec_inv, lcoe, pr, hsp_mensual, pot_ac, ahorro_a1, area_req, cap_bat, carbon_data = cotizacion(
                     Load=float(sistema.get('consumo')),
                     size=float(sistema.get('size')),
@@ -514,7 +560,8 @@ def render_tab_archivos_mobile():
                     incluir_beneficios_tributarios=incluir_beneficios_tributarios,
                     incluir_deduccion_renta=incluir_deduccion_renta,
                     incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
-                    demora_6_meses=demora_6_meses
+                    demora_6_meses=demora_6_meses,
+                    custom_params=custom_params
                 )
                 
                 # 1. Generar gráficas (guardar datos para recrearlas)

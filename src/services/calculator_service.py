@@ -8,6 +8,7 @@ import numpy_financial as npf
 import numpy as np
 import streamlit as st
 from src.config import HSP_MENSUAL_POR_CIUDAD, PROMEDIOS_COSTO
+from src.config_parametros import DEFAULT_PARAMS, get_param
 
 try:
     from carbon_calculator import CarbonEmissionsCalculator
@@ -15,25 +16,35 @@ try:
 except ImportError:
     carbon_calculator = None
 
-def calcular_costo_por_kwp(size_kwp):
+def calcular_costo_por_kwp(size_kwp, custom_params=None):
     """
     Calcula el costo por kWp según el tamaño del proyecto.
     - Para proyectos < 20 kW: usa función potencia optimizada basada en 42 datos (26 reales + 16 teóricos)
     - Para proyectos >= 20 kW: usa polinomial grado 3 optimizada basada en 38 proyectos
+
+    Args:
+        size_kwp: Tamaño del sistema en kWp
+        custom_params: Diccionario opcional con coeficientes personalizados
     """
     if size_kwp < 20:
         # Función potencia optimizada: a * size^b
         # Basada en regresión de 42 datos (26 proyectos reales + 16 calculados)
         # R² = 0.8693, MAE = $426,945/kWp, Error promedio: 7.87% con datos reales
         # Actualizada: 2025-01-27
-        costo_por_kwp = 11917544 * (size_kwp ** -0.484721)
+        coef_a = get_param("costo_pequeño_coef_a", custom_params)
+        coef_b = get_param("costo_pequeño_coef_b", custom_params)
+        costo_por_kwp = coef_a * (size_kwp ** coef_b)
     else:
         # Polinomial grado 3 optimizada: ax³ + bx² + cx + d
         # Basada en regresión de 38 proyectos (R² = 0.9892, MAE = $11,210/kWp)
         # Error promedio: 0.41%
         # Actualizada: 2025-01-27
-        costo_por_kwp = -0.265979 * size_kwp**3 + 103.58 * size_kwp**2 - 14285.52 * size_kwp + 3286846.42
-    
+        coef_a = get_param("costo_grande_coef_a", custom_params)
+        coef_b = get_param("costo_grande_coef_b", custom_params)
+        coef_c = get_param("costo_grande_coef_c", custom_params)
+        coef_d = get_param("costo_grande_coef_d", custom_params)
+        costo_por_kwp = coef_a * size_kwp**3 + coef_b * size_kwp**2 + coef_c * size_kwp + coef_d
+
     return costo_por_kwp
 
 def redondear_a_par(numero):
@@ -173,15 +184,20 @@ def recomendar_inversor(size_kwp):
             
     return " + ".join(partes), best_combo_details['total_power']
 
-def calcular_performance_ratio(clima, cubierta):
+def calcular_performance_ratio(clima, cubierta, custom_params=None):
     """
     Calcula el Performance Ratio (PR) del sistema basado en el clima y tipo de cubierta.
+
+    Args:
+        clima: Tipo de clima ("SOL", "NUBE", etc.)
+        cubierta: Tipo de cubierta ("TEJA", "LÁMINA", etc.)
+        custom_params: Diccionario opcional con PR base personalizado
     """
-    PR_BASE = 0.75  # Nuevo PR base más conservador (antes 0.85)
+    PR_BASE = get_param("performance_ratio_base", custom_params)
 
     # Ajuste por clima
     clima_upper = clima.strip().upper()
-    if clima_upper == "NUBE":
+    if clima_upper == "NUBE" or clima_upper == "NUBLADO":
         PR_BASE -= 0.05  # -5% por clima nublado
     elif clima_upper == "SOL":
         PR_BASE -= 0.02  # -2% por calor excesivo
@@ -215,25 +231,35 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
                                       profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
                                       horizonte_tiempo=25, precio_manual=None, fcl=None, monthly_generation=None,
                                       incluir_beneficios_tributarios=False, incluir_deduccion_renta=False,
-                                      incluir_depreciacion_acelerada=False):
+                                      incluir_depreciacion_acelerada=False, custom_params=None):
     """
     Genera CSV super detallado del flujo de caja con métricas financieras y técnicas completas
+
+    Args:
+        custom_params: Diccionario opcional con parámetros personalizados (precio_excedentes,
+                       tasa_degradacion_anual, porcentaje_mantenimiento, etc.)
     """
     import io
+
+    # Obtener parámetros configurables
+    precio_excedentes = get_param("precio_excedentes", custom_params)
+    tasa_degradacion = get_param("tasa_degradacion_anual", custom_params)
+    porcentaje_mantenimiento = get_param("porcentaje_mantenimiento", custom_params)
+    ajuste_teja = get_param("ajuste_cubierta_teja", custom_params)
 
     # Configuración inicial
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
     n = 0.8
     life = horizonte_tiempo
-    if clima.strip().upper() == "NUBE": n -= 0.05
+    if clima.strip().upper() == "NUBE" or clima.strip().upper() == "NUBLADO": n -= 0.05
 
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
     potencia_efectiva_calculo = min(size, potencia_ac_inversor)
 
     # Costos del proyecto
-    costo_por_kwp = calcular_costo_por_kwp(size)
+    costo_por_kwp = calcular_costo_por_kwp(size, custom_params)
     valor_proyecto_fv = costo_por_kwp * size
-    if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
+    if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= ajuste_teja
 
     costo_bateria = 0
     if incluir_baterias:
@@ -271,7 +297,7 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
         # Calcular flujo de caja básico
         cashflow_free = []
         for i in range(life):
-            current_monthly_generation = [gen * ((1 - 0.001) ** i) for gen in monthly_generation_init]
+            current_monthly_generation = [gen * ((1 - tasa_degradacion) ** i) for gen in monthly_generation_init]
 
             ahorro_anual_total = 0
             if incluir_baterias:
@@ -280,13 +306,13 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
                 for gen_mes in current_monthly_generation:
                     consumo_mes = Load
                     if gen_mes >= consumo_mes:
-                        ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)
+                        ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes)
                     else:
                         ahorro_mes = gen_mes * costkWh
                     ahorro_anual_total += ahorro_mes
 
             ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-            mantenimiento_anual = 0.05 * ahorro_anual_indexado
+            mantenimiento_anual = porcentaje_mantenimiento * ahorro_anual_indexado
             cuotas_anuales_credito = 0
             if i < plazo_credito_años:
                 cuotas_anuales_credito = cuota_mensual_credito * 12
@@ -326,8 +352,7 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
     # Años 1-N: Flujos anuales con métricas detalladas
     for i in range(life):
         # Generación del año con degradación
-        degradacion_anual = 0.001  # 0.1% por año
-        current_monthly_generation = [gen * ((1 - degradacion_anual) ** i) for gen in monthly_generation]
+        current_monthly_generation = [gen * ((1 - tasa_degradacion) ** i) for gen in monthly_generation]
         generacion_anual_total = sum(current_monthly_generation)
 
         # Consumo y excedentes
@@ -348,7 +373,7 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
                     # Consumo cubierto + excedentes vendidos
                     ahorro_mes = consumo_mes * costkWh
                     excedentes_mes = gen_mes - consumo_mes
-                    ingresos_excedentes_mes = excedentes_mes * 300.0  # precio excedentes
+                    ingresos_excedentes_mes = excedentes_mes * precio_excedentes
                     excedentes_totales += excedentes_mes
                     ingresos_excedentes += ingresos_excedentes_mes
                 else:
@@ -369,7 +394,7 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
         ingresos_excedentes_indexados = ingresos_excedentes * ((1 + index) ** i)
 
         # Mantenimiento
-        mantenimiento_anual = 0.05 * ahorro_anual_indexado
+        mantenimiento_anual = porcentaje_mantenimiento * ahorro_anual_indexado
 
         # Cuotas anuales del crédito
         cuotas_anuales_credito = 0
@@ -429,7 +454,7 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
             'Flujo_Acumulado_COP': flujo_acumulado,
             'VPN_Parcial_COP': vpn_parcial,
             'TIR_Parcial_Porc': tir_parcial,
-            'Degradación_Aplicada_Porc': degradacion_anual * 100
+            'Degradación_Aplicada_Porc': tasa_degradacion * 100
         })
 
     # Crear DataFrame y CSV
@@ -443,18 +468,35 @@ def generar_csv_flujo_caja_detallado(Load, size, quantity, cubierta, clima, inde
 def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, module, ciudad=None,
                 hsp_lista=None,
                 perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
-                tasa_degradacion=0, precio_excedentes=0,
+                tasa_degradacion=None, precio_excedentes=None,
                 incluir_baterias=False, costo_kwh_bateria=0,
                 profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
                 horizonte_tiempo=25, incluir_carbon=False,
                 incluir_beneficios_tributarios=False, incluir_deduccion_renta=False,
-                incluir_depreciacion_acelerada=False, demora_6_meses=False):
-    
+                incluir_depreciacion_acelerada=False, demora_6_meses=False,
+                custom_params=None):
+    """
+    Función principal de cotización para sistemas solares.
+
+    Args:
+        custom_params: Diccionario opcional con parámetros personalizados.
+                       Si se pasan tasa_degradacion o precio_excedentes directamente,
+                       estos tienen prioridad sobre custom_params.
+    """
+    # Obtener parámetros configurables (prioridad: argumento directo > custom_params > default)
+    if tasa_degradacion is None:
+        tasa_degradacion = get_param("tasa_degradacion_anual", custom_params)
+    if precio_excedentes is None:
+        precio_excedentes = get_param("precio_excedentes", custom_params)
+
+    porcentaje_mantenimiento = get_param("porcentaje_mantenimiento", custom_params)
+    ajuste_teja = get_param("ajuste_cubierta_teja", custom_params)
+
     # Se asegura de tener la lista de HSP mensuales para el cálculo
     hsp_mensual = hsp_lista if hsp_lista is not None else HSP_MENSUAL_POR_CIUDAD.get(ciudad.upper(), HSP_MENSUAL_POR_CIUDAD["MEDELLIN"])
-    
+
     life = horizonte_tiempo
-    n = calcular_performance_ratio(clima, cubierta)
+    n = calcular_performance_ratio(clima, cubierta, custom_params)
     
     recomendacion_inversor_str, potencia_ac_inversor = recomendar_inversor(size)
     
@@ -467,9 +509,9 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
     factor_seguridad = 1.30
     area_requerida = math.ceil(quantity * area_por_panel * factor_seguridad)
     
-    costo_por_kwp = calcular_costo_por_kwp(size)
+    costo_por_kwp = calcular_costo_por_kwp(size, custom_params)
     valor_proyecto_fv = costo_por_kwp * size
-    if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= 1.03
+    if cubierta.strip().upper() == "TEJA": valor_proyecto_fv *= ajuste_teja
 
     costo_bateria = 0
     capacidad_nominal_bateria = 0
@@ -531,7 +573,7 @@ def cotizacion(Load, size, quantity, cubierta, clima, index, dRate, costkWh, mod
         if demora_6_meses and i == 0:  # Solo afecta el año 1
             ahorro_anual_indexado *= 0.5  # 50% para 6 meses de operación
 
-        mantenimiento_anual = 0.05 * ahorro_anual_indexado
+        mantenimiento_anual = porcentaje_mantenimiento * ahorro_anual_indexado
         cuotas_anuales_credito = 0
         if i < plazo_credito_años:
             cuotas_anuales_credito = cuota_mensual_credito * 12
@@ -595,10 +637,18 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                                     profundidad_descarga=0.9, eficiencia_bateria=0.95, dias_autonomia=2,
                                     perc_financiamiento=0, tasa_interes_credito=0, plazo_credito_años=0,
                                     precio_manual=None, horizonte_base=25, incluir_beneficios_tributarios=False,
-                                    incluir_deduccion_renta=False, incluir_depreciacion_acelerada=False):
+                                    incluir_deduccion_renta=False, incluir_depreciacion_acelerada=False,
+                                    custom_params=None):
     """
     Calcula análisis de sensibilidad con TIR a 10 y 20 años con y sin financiación
+
+    Args:
+        custom_params: Diccionario opcional con parámetros personalizados
     """
+    # Obtener parámetros configurables
+    precio_excedentes = get_param("precio_excedentes", custom_params)
+    porcentaje_mantenimiento = get_param("porcentaje_mantenimiento", custom_params)
+
     resultados = {}
     
     # Escenarios a analizar
@@ -616,7 +666,7 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
             tasa_interes_escenario = tasa_interes_credito if escenario["financiamiento"] else 0
             plazo_escenario = plazo_credito_años if escenario["financiamiento"] else 0
             
-            # Calcular cotización para este escenario
+            # Calcular cotización para este escenario (usar parámetros configurables)
             valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
             desembolso_inicial_cliente, fcl, trees, monthly_generation, valor_presente, \
             tasa_interna, cantidad_calc, life, recomendacion_inversor, lcoe, n_final, hsp_mensual_final, \
@@ -626,14 +676,13 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                           perc_financiamiento=perc_fin_escenario,
                           tasa_interes_credito=tasa_interes_escenario,
                           plazo_credito_años=plazo_escenario,
-                          tasa_degradacion=0.001, precio_excedentes=300.0,
                           incluir_baterias=incluir_baterias, costo_kwh_bateria=costo_kwh_bateria,
                           profundidad_descarga=profundidad_descarga, eficiencia_bateria=eficiencia_bateria,
                           dias_autonomia=dias_autonomia, horizonte_tiempo=horizonte_base,
                           incluir_carbon=False, incluir_beneficios_tributarios=incluir_beneficios_tributarios,
                           incluir_deduccion_renta=incluir_deduccion_renta,
                           incluir_depreciacion_acelerada=incluir_depreciacion_acelerada,
-                          demora_6_meses=False)  # Disable carbon and tax benefits for sensitivity analysis
+                          demora_6_meses=False, custom_params=custom_params)
             
             # SIEMPRE recalcular el flujo de caja para asegurar consistencia
             if precio_manual is not None:
@@ -660,24 +709,24 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                         for gen_mes in monthly_generation:
                             consumo_mes = Load
                             if gen_mes >= consumo_mes:
-                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes)
                             else:
                                 ahorro_mes = gen_mes * costkWh
                             ahorro_anual_total += ahorro_mes
-                    
+
                     # Aplicar indexación anual
                     ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-                    
+
                     # Mantenimiento anual
-                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
-                    
+                    mantenimiento_anual = porcentaje_mantenimiento * ahorro_anual_indexado
+
                     # Sin cuotas de crédito para escenarios sin financiación
                     cuotas_anuales_credito = 0
-                    
+
                     # Flujo anual
                     flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
                     fcl.append(flujo_anual)
-                
+
                 # Insertar desembolso inicial al inicio
                 fcl.insert(0, -desembolso_inicial_cliente)
             else:
@@ -692,26 +741,26 @@ def calcular_analisis_sensibilidad(Load, size, quantity, cubierta, clima, index,
                         for gen_mes in monthly_generation:
                             consumo_mes = Load
                             if gen_mes >= consumo_mes:
-                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * 300.0)  # precio_excedentes = 300
+                                ahorro_mes = (consumo_mes * costkWh) + ((gen_mes - consumo_mes) * precio_excedentes)
                             else:
                                 ahorro_mes = gen_mes * costkWh
                             ahorro_anual_total += ahorro_mes
-                    
+
                     # Aplicar indexación anual
                     ahorro_anual_indexado = ahorro_anual_total * ((1 + index) ** i)
-                    
+
                     # Mantenimiento anual
-                    mantenimiento_anual = 0.05 * ahorro_anual_indexado
-                    
+                    mantenimiento_anual = porcentaje_mantenimiento * ahorro_anual_indexado
+
                     # Cuotas anuales del crédito
                     cuotas_anuales_credito = 0
-                    if i < plazo_escenario: 
+                    if i < plazo_escenario:
                         cuotas_anuales_credito = cuota_mensual_credito * 12
-                    
+
                     # Flujo anual
                     flujo_anual = ahorro_anual_indexado - mantenimiento_anual - cuotas_anuales_credito
                     fcl.append(flujo_anual)
-                
+
                 # Insertar desembolso inicial al inicio
                 fcl.insert(0, -desembolso_inicial_cliente)
             
