@@ -27,7 +27,8 @@ ESTRUCTURA_CARPETAS = {
     "02_Ingenieria_y_Diseno": {},
     "03_Adquisiciones_y_Logistica": {},
     "04_UPME": {},
-    "05_EPM": {}
+    "05_EPM": {},
+    "06_RETIE": {}
 }
 
 HSP_POR_CIUDAD = {
