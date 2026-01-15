@@ -501,3 +501,163 @@ class TestConfigurableParameters:
     def test_default_performance_ratio(self):
         """Default PR base should be 75%."""
         assert DEFAULT_PARAMS['performance_ratio_base'] == 0.75
+
+
+# =============================================================================
+# Tests for calcular_lista_materiales
+# =============================================================================
+
+class TestCalcularListaMateriales:
+    """Tests for the materials list calculation function."""
+
+    def test_returns_dict(self):
+        """Should return a dictionary."""
+        from src.services.calculator_service import calcular_lista_materiales
+        result = calcular_lista_materiales(10, 'LÁMINA', 500, '1x5kW')
+        assert isinstance(result, dict), "Should return a dictionary"
+
+    def test_includes_panels(self):
+        """Should include solar panels in the list."""
+        from src.services.calculator_service import calcular_lista_materiales
+        result = calcular_lista_materiales(10, 'LÁMINA', 500, '1x5kW')
+        # Check if any key contains 'Módulos' or 'paneles'
+        has_panels = any('Módulos' in k or 'Panel' in k for k in result.keys())
+        assert has_panels, "Should include solar panels"
+
+    def test_includes_inverter(self):
+        """Should include inverter in the list."""
+        from src.services.calculator_service import calcular_lista_materiales
+        result = calcular_lista_materiales(10, 'LÁMINA', 500, '2x5kW')
+        has_inverter = any('Inversor' in k for k in result.keys())
+        assert has_inverter, "Should include inverter"
+
+    def test_panel_count_matches_input(self):
+        """Panel count should match the input quantity."""
+        from src.services.calculator_service import calcular_lista_materiales
+        result = calcular_lista_materiales(20, 'LÁMINA', 615, '2x5kW')
+        panel_key = [k for k in result.keys() if 'Módulos' in k][0]
+        assert result[panel_key] == 20, "Panel count should match input"
+
+    def test_zero_panels_returns_empty(self):
+        """Zero panels should return empty dict."""
+        from src.services.calculator_service import calcular_lista_materiales
+        result = calcular_lista_materiales(0, 'LÁMINA', 500, '1x5kW')
+        assert result == {}, "Zero panels should return empty dict"
+
+
+# =============================================================================
+# Tests for calcular_analisis_sensibilidad
+# =============================================================================
+
+class TestCalcularAnalisisSensibilidad:
+    """Tests for the sensitivity analysis function."""
+
+    def test_returns_dict_with_scenarios(self, small_system_params, default_hsp_medellin):
+        """Should return a dictionary with scenario results."""
+        from src.services.calculator_service import calcular_analisis_sensibilidad
+        result = calcular_analisis_sensibilidad(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        assert isinstance(result, dict), "Should return a dictionary"
+
+    def test_includes_expected_scenarios(self, small_system_params, default_hsp_medellin):
+        """Should include base, optimistic, and pessimistic scenarios."""
+        from src.services.calculator_service import calcular_analisis_sensibilidad
+        result = calcular_analisis_sensibilidad(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        # Check that we have multiple scenarios
+        assert len(result) >= 3, "Should have at least 3 scenarios"
+
+    def test_scenarios_have_tir_vpn(self, small_system_params, default_hsp_medellin):
+        """Each scenario should have TIR and VPN values."""
+        from src.services.calculator_service import calcular_analisis_sensibilidad
+        result = calcular_analisis_sensibilidad(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        for scenario_name, scenario_data in result.items():
+            if isinstance(scenario_data, dict):
+                # Each scenario should have financial metrics
+                assert 'tir' in scenario_data or 'TIR' in scenario_data or any('tir' in k.lower() for k in scenario_data.keys()), \
+                    f"Scenario {scenario_name} should have TIR"
+
+
+# =============================================================================
+# Tests for financial calculations accuracy
+# =============================================================================
+
+class TestFinancialCalculationsAccuracy:
+    """Tests to verify financial calculation accuracy."""
+
+    def test_irr_calculation_accuracy(self, small_system_params, default_hsp_medellin):
+        """IRR should be calculated correctly based on cash flows."""
+        result = cotizacion(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        fcl = result[5]  # Cash flow
+        tir = result[9]  # TIR
+        
+        # Verify TIR by checking NPV at TIR should be close to 0
+        import numpy_financial as npf
+        npv_at_irr = npf.npv(tir, fcl)
+        assert abs(npv_at_irr) < 1000, f"NPV at IRR should be ~0, got {npv_at_irr}"
+
+    def test_savings_calculation(self, small_system_params, default_hsp_medellin):
+        """First year savings should be based on generation and kWh cost."""
+        result = cotizacion(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        monthly_gen = result[7]  # Monthly generation
+        ahorro_año1 = result[17]  # First year savings
+        
+        # Annual generation
+        gen_anual = sum(monthly_gen)
+        # Maximum possible savings (if all generation is self-consumed)
+        max_savings = gen_anual * small_system_params['costkWh']
+        
+        # Actual savings should be <= max possible
+        assert ahorro_año1 <= max_savings * 1.1, "Savings should not exceed generation value"
+        assert ahorro_año1 > 0, "Savings should be positive"
+
+    def test_payback_calculation(self, small_system_params, default_hsp_medellin):
+        """Payback should occur when cumulative cash flow becomes positive."""
+        result = cotizacion(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        fcl = result[5]
+        
+        # Find payback manually
+        cumsum = np.cumsum(fcl)
+        payback_manual = None
+        for i, val in enumerate(cumsum):
+            if val >= 0:
+                payback_manual = i
+                break
+        
+        # Payback should be reasonable (< 15 years for a viable project)
+        if payback_manual is not None:
+            assert payback_manual <= 15, f"Payback {payback_manual} years seems too long"
+
+    def test_lcoe_calculation(self, small_system_params, default_hsp_medellin):
+        """LCOE should be calculated and be in reasonable range."""
+        result = cotizacion(
+            **small_system_params,
+            ciudad="MEDELLIN",
+            hsp_lista=default_hsp_medellin,
+        )
+        lcoe = result[13]  # LCOE
+        
+        # LCOE for solar in Colombia should be between 100-600 COP/kWh
+        assert 100 < lcoe < 600, f"LCOE {lcoe} COP/kWh seems out of range"

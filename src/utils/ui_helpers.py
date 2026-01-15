@@ -8,9 +8,26 @@ def detect_mobile_device():
     return st.session_state.get('force_mobile', False)
 
 def apply_responsive_css():
-    """Aplica CSS responsive para móviles"""
+    """Aplica CSS responsive para móviles y personalización del sidebar"""
     st.markdown("""
     <style>
+    /* === SIDEBAR MÁS ANCHO === */
+    [data-testid="stSidebar"] {
+        min-width: 400px !important;
+        max-width: 450px !important;
+    }
+    
+    [data-testid="stSidebar"] > div:first-child {
+        min-width: 400px !important;
+        max-width: 450px !important;
+    }
+    
+    /* Ajustar contenido del sidebar */
+    [data-testid="stSidebar"] .block-container {
+        padding: 1rem 1.5rem !important;
+    }
+    
+    /* === RESPONSIVE MÓVIL === */
     @media (max-width: 768px) {
         .stButton > button {
             width: 100% !important;

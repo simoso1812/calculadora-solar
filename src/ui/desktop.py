@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import datetime
 import os
 import math
+import base64
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -21,40 +22,73 @@ from src.services.calculator_service import (
 )
 from src.services.drive_service import obtener_siguiente_consecutivo, gestionar_creacion_drive
 from src.services.location_service import get_static_map_image
-from src.services.pvgis_service import get_pvgis_hsp_alternative
+from src.services.pvgis_service import get_pvgis_hsp_alternative, get_data_source_label, DATA_SOURCE_PVGIS
 from src.services.notion_service import agregar_cliente_a_notion_crm
 from src.utils.pdf_generator import PropuestaPDF
 from src.utils.contract_generator import generar_contrato_docx
 from src.utils.chargers import generar_pdf_cargadores
 from src.utils.helpers import validar_datos_entrada, formatear_moneda
 from src.utils.plotting import generar_grafica_generacion
+from src.utils.excel_generator import generar_excel_financiero
 
 
+
+def init_form_defaults():
+    """Initialize session state with default form values to persist across reruns"""
+    defaults = {
+        'form_nombre_cliente': '',
+        'form_documento_cliente': '',
+        'form_direccion_proyecto': '',
+        'form_ubicacion': '',
+        'form_consumo': 700,
+        'form_potencia_panel': 615,
+        'form_cubierta': 'LÁMINA',
+        'form_clima': 'SOL',
+        'form_costo_kwh': 850,
+        'form_indexacion': 5.0,
+        'form_tasa_descuento': 10.0,
+        'form_horizonte': 25,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 def render_desktop_interface():
     """Interfaz optimizada para desktop"""
-    # Debug visual - confirmar que estamos en modo desktop
-    st.markdown("""
-    <div style="background: #4ecdc4; color: white; padding: 20px; border-radius: 15px; text-align: center; margin: 20px 0; border: 3px solid #45b7d1;">
-        <h1 style="margin: 0; color: white;">🖥️ MODO DESKTOP ACTIVADO 🖥️</h1>
-        <p style="margin: 10px 0; font-size: 18px;">Interfaz completa con sidebar</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Header desktop con indicador claro
-    col1, col2, col3 = st.columns([1, 3, 1])
-    with col1:
-        st.markdown("🖥️")
-    with col2:
-        st.title("☀️ Calculadora y Cotizador Solar Profesional")
-    with col3:
-        st.markdown("🖥️")
-    
-    st.success("✅ Interfaz desktop cargada correctamente")
+    st.title("☀️ Calculadora y Cotizador Solar Profesional")
+
+    # === PROCESAR DUPLICACIÓN ANTES DE INIT ===
+    # Si hay datos pendientes para duplicar, cargarlos antes de crear widgets
+    if 'duplicar_datos' in st.session_state and st.session_state.duplicar_datos:
+        datos = st.session_state.duplicar_datos
+        st.session_state.form_nombre_cliente = datos.get('nombre_cliente', '')
+        st.session_state.form_documento_cliente = datos.get('documento_cliente', '')
+        st.session_state.form_direccion_proyecto = datos.get('direccion_proyecto', '')
+        st.session_state.form_consumo = datos.get('Load', 700)
+        st.session_state.form_costo_kwh = datos.get('costkWh', 850)
+        st.session_state.form_indexacion = datos.get('index_input', 5.0)
+        st.session_state.form_tasa_descuento = datos.get('dRate_input', 10.0)
+        st.session_state.form_horizonte = datos.get('horizonte_tiempo', 25)
+        if datos.get('lat') and datos.get('lon'):
+            st.session_state.map_state = {
+                "center": [datos['lat'], datos['lon']],
+                "zoom": 16,
+                "marker": [datos['lat'], datos['lon']]
+            }
+        # Limpiar flag
+        st.session_state.duplicar_datos = None
+        st.toast("✅ Cotización duplicada. Modifica los parámetros y genera una nueva.")
+
+    # Initialize form defaults for persistence
+    init_form_defaults()
 
     # Inicializar estado de resultados si no existe
     if 'desktop_results' not in st.session_state:
         st.session_state.desktop_results = None
+    
+    # Inicializar historial de cotizaciones (máximo 10)
+    if 'historial_cotizaciones' not in st.session_state:
+        st.session_state.historial_cotizaciones = []
 
     # --- INICIALIZACIÓN DE SERVICIOS Y DATOS ---
     drive_service = None
@@ -86,14 +120,49 @@ def render_desktop_interface():
     with st.sidebar:
         st.header("Parámetros de Entrada")
         
+        # === HISTORIAL DE COTIZACIONES ===
+        if st.session_state.historial_cotizaciones:
+            with st.expander(f"📜 Historial de Cotizaciones ({len(st.session_state.historial_cotizaciones)})", expanded=False):
+                st.caption("Últimas cotizaciones generadas. Haz clic en 'Duplicar' para cargar los parámetros.")
+                
+                for i, cot in enumerate(st.session_state.historial_cotizaciones):
+                    with st.container():
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"**{cot['nombre_cliente']}**")
+                            st.caption(f"📅 {cot['fecha']} | ⚡ {cot['size']:.1f} kWp | 💰 ${cot['val_total']:,.0f}")
+                        with col2:
+                            if st.button("🔄", key=f"duplicar_{cot['id']}", help="Duplicar esta cotización"):
+                                # Guardar datos para duplicar en el próximo ciclo
+                                st.session_state.duplicar_datos = {
+                                    'nombre_cliente': cot['nombre_cliente'] + " (copia)",
+                                    'documento_cliente': cot.get('documento_cliente', ''),
+                                    'direccion_proyecto': cot.get('direccion_proyecto', ''),
+                                    'Load': cot['Load'],
+                                    'costkWh': cot['costkWh'],
+                                    'index_input': cot['index_input'],
+                                    'dRate_input': cot['dRate_input'],
+                                    'horizonte_tiempo': cot['horizonte_tiempo'],
+                                    'lat': cot.get('lat'),
+                                    'lon': cot.get('lon'),
+                                }
+                                st.session_state.desktop_results = None
+                                st.rerun()
+                        st.divider()
+                
+                # Botón para limpiar historial
+                if st.button("🗑️ Limpiar historial", use_container_width=True):
+                    st.session_state.historial_cotizaciones = []
+                    st.rerun()
+        
         st.subheader("Datos del Cliente y Propuesta")
-        nombre_cliente = st.text_input("Nombre del Cliente", "Andres Pinzón")
-        documento_cliente = st.text_input("Documento del Cliente (CC o NIT)", "123.456.789-0")
-        direccion_proyecto = st.text_input("Dirección del Proyecto", "Villa Roca 1 Int. 9B, Copacabana")
+        nombre_cliente = st.text_input("Nombre del Cliente", key="form_nombre_cliente")
+        documento_cliente = st.text_input("Documento del Cliente (CC o NIT)", key="form_documento_cliente")
+        direccion_proyecto = st.text_input("Dirección del Proyecto", key="form_direccion_proyecto")
         fecha_propuesta = st.date_input("Fecha de la Propuesta", datetime.date.today()) 
         
         st.subheader("Información del Proyecto (Interna)")
-        ubicacion = st.text_input("Ubicación (Etiqueta para carpeta)", "Villa Roca 1")
+        ubicacion = st.text_input("Ubicación (Etiqueta para carpeta)", key="form_ubicacion")
         st.text_input("Número de Proyecto del Año (Automático)", value=numero_proyecto_del_año, disabled=True)
         
         st.subheader("Ubicación Geográfica")
@@ -107,9 +176,57 @@ def render_desktop_interface():
         else:
             st.warning("Variable de entorno Maps_API_KEY no configurada. La búsqueda está desactivada.")
 
+        # === BOTÓN USAR MI UBICACIÓN ===
+        col_geo1, col_geo2 = st.columns([1, 1])
+        with col_geo1:
+            if st.button("📍 Usar mi ubicación", key="use_my_location_desktop", use_container_width=True):
+                st.session_state.requesting_location = True
+        
+        # JavaScript para obtener geolocalización
+        if st.session_state.get('requesting_location', False):
+            import streamlit.components.v1 as components
+            geolocation_js = """
+            <script>
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    function(position) {
+                        const lat = position.coords.latitude;
+                        const lng = position.coords.longitude;
+                        localStorage.setItem('user_lat', lat);
+                        localStorage.setItem('user_lng', lng);
+                        alert('Ubicación obtenida: ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '\\n\\nSi el mapa no se actualiza automáticamente, ingresa estas coordenadas manualmente.');
+                    },
+                    function(error) {
+                        alert('Error obteniendo ubicación: ' + error.message + '\\n\\nAsegúrate de permitir el acceso a la ubicación.');
+                    },
+                    {enableHighAccuracy: true, timeout: 10000}
+                );
+            } else {
+                alert('Tu navegador no soporta geolocalización');
+            }
+            </script>
+            <p style="color: #888; font-size: 12px;">🔄 Solicitando ubicación... Permite el acceso cuando el navegador lo pida.</p>
+            """
+            components.html(geolocation_js, height=50)
+            st.session_state.requesting_location = False
+        
+        # Input manual de coordenadas como alternativa
+        with col_geo2:
+            with st.popover("📝 Ingresar coordenadas"):
+                st.caption("Ingresa las coordenadas manualmente:")
+                manual_lat = st.number_input("Latitud", value=6.2, min_value=-90.0, max_value=90.0, format="%.6f", key="manual_lat_desktop")
+                manual_lng = st.number_input("Longitud", value=-75.5, min_value=-180.0, max_value=180.0, format="%.6f", key="manual_lng_desktop")
+                if st.button("✅ Aplicar", key="apply_manual_coords_desktop"):
+                    if "map_state" not in st.session_state:
+                        st.session_state.map_state = {}
+                    st.session_state.map_state["marker"] = [manual_lat, manual_lng]
+                    st.session_state.map_state["center"] = [manual_lat, manual_lng]
+                    st.session_state.map_state["zoom"] = 16
+                    st.rerun()
+
         address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search")
         address = address.strip()
-        if st.button("Buscar Dirección"):
+        if st.button("🔎 Buscar Dirección"):
             if not address:
                 st.warning("Por favor, ingresa una dirección para buscar.")
             elif not gmaps:
@@ -137,7 +254,26 @@ def render_desktop_interface():
         if "map_state" not in st.session_state:
             st.session_state.map_state = {"center": [4.5709, -74.2973], "zoom": 6, "marker": None}
 
-        m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
+        # === TOGGLE VISTA SATÉLITE ===
+        vista_satelite = st.toggle("🛰️ Vista Satélite", key="satellite_view_desktop")
+        
+        # Crear mapa con tiles según selección
+        if vista_satelite:
+            m = folium.Map(
+                location=st.session_state.map_state["center"], 
+                zoom_start=st.session_state.map_state["zoom"],
+                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                attr='Esri World Imagery'
+            )
+            folium.TileLayer(
+                tiles='https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+                attr='Esri Labels',
+                overlay=True,
+                name='Etiquetas'
+            ).add_to(m)
+        else:
+            m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
+        
         if st.session_state.map_state["marker"]:
             folium.Marker(location=st.session_state.map_state["marker"], popup="Ubicación del Proyecto", icon=folium.Icon(color="red")).add_to(m)
         map_data = st_folium(m, width=700, height=400, key="folium_map_main")
@@ -157,7 +293,14 @@ def render_desktop_interface():
             hsp_mensual_calculado = st.session_state.pvgis_data
             if hsp_mensual_calculado:
                 promedio_hsp_anual = sum(hsp_mensual_calculado) / len(hsp_mensual_calculado)
-                st.success("✅ Datos de HSP obtenidos de PVGIS.")
+                
+                # Show data source clearly
+                data_source = get_data_source_label()
+                if st.session_state.get('hsp_data_source') == DATA_SOURCE_PVGIS:
+                    st.success(f"✅ {data_source}")
+                else:
+                    st.info(f"📊 {data_source}")
+                
                 st.metric(label="Promedio Diario Anual (HSP)", value=f"{promedio_hsp_anual:.2f} kWh/m²")
                 
                 # Mostrar detalles mensuales
@@ -193,10 +336,37 @@ def render_desktop_interface():
             hsp_a_usar = HSP_MENSUAL_POR_CIUDAD[ciudad_input]
             ciudad_para_calculo = ciudad_input
         
+        # === PARAMETER PRESETS ===
+        st.subheader("⚡ Configuración Rápida")
+        
+        PRESETS = {
+            "Personalizado": {"consumo": 700, "paneles": 12, "cubierta": "LÁMINA", "clima": "SOL", "descripcion": "Configura manualmente todos los parámetros"},
+            "🏠 Residencial Pequeño": {"consumo": 350, "paneles": 6, "cubierta": "TEJA", "clima": "SOL", "descripcion": "Casa pequeña, 1-2 personas (~3 kWp)"},
+            "🏡 Residencial Mediano": {"consumo": 700, "paneles": 12, "cubierta": "LÁMINA", "clima": "SOL", "descripcion": "Casa mediana, 3-4 personas (~6 kWp)"},
+            "🏘️ Residencial Grande": {"consumo": 1200, "paneles": 20, "cubierta": "LÁMINA", "clima": "SOL", "descripcion": "Casa grande, 5+ personas (~10 kWp)"},
+            "🏪 Comercial Pequeño": {"consumo": 2500, "paneles": 40, "cubierta": "LÁMINA", "clima": "SOL", "descripcion": "Local comercial, oficina (~20 kWp)"},
+            "🏢 Comercial Grande": {"consumo": 6000, "paneles": 100, "cubierta": "LÁMINA", "clima": "SOL", "descripcion": "Bodega, supermercado (~50 kWp)"},
+            "🏭 Industrial": {"consumo": 12000, "paneles": 200, "cubierta": "LÁMINA", "clima": "SOL", "descripcion": "Fábrica, planta industrial (~100 kWp)"},
+        }
+        
+        preset_seleccionado = st.selectbox(
+            "Tipo de proyecto",
+            list(PRESETS.keys()),
+            format_func=lambda x: f"{x} - {PRESETS[x]['descripcion']}" if x != "Personalizado" else "Personalizado",
+            key="preset_proyecto_desktop"
+        )
+        
+        preset_actual = PRESETS[preset_seleccionado]
+        
+        if preset_seleccionado != "Personalizado":
+            st.caption(f"💡 {preset_actual['descripcion']}")
+        
+        st.divider()
+        
         opcion = st.radio("Método para dimensionar:", ["Por Consumo Mensual (kWh)", "Por Cantidad de Paneles"], horizontal=True, key="metodo_dimensionamiento")
 
         if opcion == "Por Consumo Mensual (kWh)":
-            Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
+            Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=preset_actual['consumo'], step=50)
             module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
             
             # Factor de seguridad configurable
@@ -222,15 +392,88 @@ def render_desktop_interface():
             st.info(f"Sistema estimado: **{size:.2f} kWp** ({int(quantity)} paneles)")
         else:
             module = st.number_input("Potencia del panel (W)", min_value=300, value=615, step=10)
-            quantity_input = st.number_input("Cantidad de paneles", min_value=1, value=12, step=2)
+            quantity_input = st.number_input("Cantidad de paneles", min_value=1, value=preset_actual['paneles'], step=2)
             quantity = redondear_a_par(quantity_input)
-            Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=700, step=50)
+            Load = st.number_input("Consumo mensual (kWh)", min_value=50, value=preset_actual['consumo'], step=50)
             size = round((quantity * module) / 1000, 2)
             st.info(f"Sistema dimensionado: **{size:.2f} kWp**")
 
         st.subheader("Datos Generales")
-        cubierta = st.selectbox("Tipo de cubierta", ["LÁMINA", "TEJA"])
-        clima = st.selectbox("Clima predominante", ["SOL", "NUBE"])
+        cubierta_options = ["LÁMINA", "TEJA"]
+        cubierta_default = cubierta_options.index(preset_actual['cubierta']) if preset_actual['cubierta'] in cubierta_options else 0
+        cubierta = st.selectbox("Tipo de cubierta", cubierta_options, index=cubierta_default)
+        
+        clima_options = ["SOL", "NUBE"]
+        clima_default = clima_options.index(preset_actual['clima']) if preset_actual['clima'] in clima_options else 0
+        clima = st.selectbox("Clima predominante", clima_options, index=clima_default)
+        
+        # Inverter brand selection
+        st.subheader("🔌 Marca de Inversor")
+        usar_marca_inversor = st.toggle(
+            "Especificar marca de inversor",
+            help="Selecciona una marca específica de inversor para la propuesta",
+            key="usar_marca_inversor_desktop"
+        )
+        
+        marca_inversor = "Automático"
+        modelo_inversor = None
+        if usar_marca_inversor:
+            marcas_inversores = {
+                "Huawei": {
+                    "descripcion": "🇨🇳 Premium - Alta eficiencia, monitoreo avanzado",
+                    "modelos": ["SUN2000-3KTL", "SUN2000-5KTL", "SUN2000-6KTL", "SUN2000-8KTL", "SUN2000-10KTL", 
+                               "SUN2000-20KTL", "SUN2000-30KTL", "SUN2000-40KTL", "SUN2000-50KTL", "SUN2000-100KTL"],
+                },
+                "Deye": {
+                    "descripcion": "🇨🇳 Híbrido - Compatible con baterías, backup",
+                    "modelos": ["SUN-3K-SG04LP1", "SUN-5K-SG04LP1", "SUN-6K-SG04LP1", "SUN-8K-SG04LP1", 
+                               "SUN-10K-SG04LP1", "SUN-12K-SG04LP3", "SUN-15K-SG04LP3", "SUN-20K-SG04LP3",
+                               "SUN-25K-SG04LP3", "SUN-30K-SG04LP3", "SUN-50K-SG01HP3"],
+                },
+                "Growatt": {
+                    "descripcion": "🇨🇳 Económico - Buena relación precio/calidad",
+                    "modelos": ["MIN 3000TL-X", "MIN 5000TL-X", "MIN 6000TL-X", "MOD 8000TL3-X", "MOD 10000TL3-X",
+                               "MOD 20000TL3-X", "MOD 30000TL3-X", "MAX 50KTL3", "MAX 100KTL3"],
+                },
+                "Solis": {
+                    "descripcion": "🇨🇳 Económico - Opción accesible",
+                    "modelos": ["S5-GR1P3K", "S5-GR1P5K", "S5-GR1P6K", "S5-GR3P8K", "S5-GR3P10K",
+                               "S5-GC20K", "S5-GC30K", "S5-GC50K", "S5-GC100K"],
+                },
+                "Hoymiles": {
+                    "descripcion": "🇨🇳 Microinversor - Ideal para sistemas ≤4kW",
+                    "modelos": ["HMS-2000-4T"],
+                },
+            }
+            
+            marca_inversor = st.selectbox(
+                "Marca del inversor",
+                list(marcas_inversores.keys()),
+                format_func=lambda x: f"{x} - {marcas_inversores[x]['descripcion']}",
+                key="marca_inversor_desktop"
+            )
+            
+            modelos_disponibles = marcas_inversores[marca_inversor]["modelos"]
+            modelo_inversor = st.selectbox(
+                "Modelo específico (opcional)",
+                ["Automático según potencia"] + modelos_disponibles,
+                key="modelo_inversor_desktop"
+            )
+            
+            if modelo_inversor == "Automático según potencia":
+                modelo_inversor = None
+            
+            st.info(f"📋 Se incluirá **{marca_inversor}** en la propuesta")
+
+        # Smart Meter option
+        st.subheader("📊 Opciones de Propuesta")
+        incluir_smartmeter = st.toggle(
+            "🔌 Incluir Smart Meter",
+            help="Agrega una página de Smart Meter (medidor inteligente) a la propuesta",
+            key="incluir_smartmeter_desktop"
+        )
+        if incluir_smartmeter:
+            st.info("📊 Se incluirá la página de **Smart Meter** en la propuesta PDF")
 
         st.subheader("Parámetros Financieros")
         
@@ -259,15 +502,52 @@ def render_desktop_interface():
             key="analisis_sensibilidad_desktop"
         )
         
-        # Debug: Mostrar el valor del toggle
-        st.write(f"🔧 Debug - Toggle activado: {incluir_analisis_sensibilidad}")
-        
         if incluir_analisis_sensibilidad:
             st.info("📈 **Análisis de Sensibilidad**: Se calculará TIR a 10 y 20 años con y sin financiación para mostrar la robustez del proyecto")
+        
+        # Multi-project comparison
+        st.subheader("🔄 Comparación de Tamaños")
+        incluir_comparacion_tamanos = st.toggle(
+            "🔄 Comparar diferentes tamaños de sistema",
+            help="Compara 3 tamaños de sistema: 80%, 100% y 120% del tamaño calculado",
+            key="comparacion_tamanos_desktop"
+        )
+        
+        if incluir_comparacion_tamanos:
+            st.info("📊 **Comparación de tamaños**: Se calcularán 3 escenarios para ayudar al cliente a elegir el tamaño óptimo")
         
         costkWh = st.number_input("Costo por kWh (COP)", min_value=200, value=850, step=10)
         index_input = st.slider("Indexación de energía (%)", 0.0, 20.0, 5.0, 0.5)
         dRate_input = st.slider("Tasa de descuento (%)", 0.0, 25.0, 10.0, 0.5)
+        
+        # Modo de conexión a red
+        st.subheader("⚡ Modo de Conexión")
+        modo_conexion = st.radio(
+            "Selecciona el modo de compensación:",
+            ["Net Metering (Intercambio 1:1)", "Net Billing (Excedentes a precio reducido)", "Autoconsumo (Sin venta de excedentes)"],
+            index=1,
+            help="Define cómo se compensan los excedentes de energía",
+            key="modo_conexion_desktop"
+        )
+        
+        # Precio de excedentes según modo
+        if modo_conexion == "Net Metering (Intercambio 1:1)":
+            precio_excedentes_input = costkWh  # Same as purchase price
+            st.success(f"✅ Excedentes valorados al mismo precio de compra: ${costkWh:,} COP/kWh")
+        elif modo_conexion == "Net Billing (Excedentes a precio reducido)":
+            precio_excedentes_input = st.number_input(
+                "Precio de venta de excedentes (COP/kWh)", 
+                min_value=0, 
+                max_value=costkWh, 
+                value=min(350, costkWh),
+                step=10,
+                help="Precio al que la comercializadora compra los excedentes"
+            )
+            porcentaje_precio = (precio_excedentes_input / costkWh * 100) if costkWh > 0 else 0
+            st.info(f"📊 Precio de excedentes: {porcentaje_precio:.0f}% del precio de compra")
+        else:  # Autoconsumo
+            precio_excedentes_input = 0
+            st.warning("⚠️ Modo Autoconsumo: Los excedentes no generan ingresos. Considera dimensionar para cubrir exactamente el consumo.")
         
         st.subheader("Financiamiento")
         usa_financiamiento = st.toggle("Incluir financiamiento", key="financiamiento_desktop")
@@ -338,22 +618,22 @@ def render_desktop_interface():
             key="params_avanzados_desktop"
         )
 
-        # Inicializar custom_params
-        custom_params = None
+        # Inicializar custom_params - siempre incluir precio de excedentes del modo de conexión
+        custom_params = {"precio_excedentes": precio_excedentes_input}
+        
         if usar_params_personalizados:
             st.info("💡 **Parámetros Avanzados**: Ajusta los valores según las condiciones específicas del proyecto")
 
-            custom_params = {}
-
             col_p1, col_p2 = st.columns(2)
             with col_p1:
+                # Use net metering price as base, allow override
                 custom_params["precio_excedentes"] = st.number_input(
                     "Precio venta excedentes (COP/kWh)",
                     min_value=0,
                     max_value=2000,
-                    value=int(DEFAULT_PARAMS["precio_excedentes"]),
+                    value=int(precio_excedentes_input),  # Use value from net metering selection
                     step=10,
-                    help=PARAM_DESCRIPTIONS["precio_excedentes"],
+                    help=f"Valor base del modo de conexión: ${precio_excedentes_input}. " + PARAM_DESCRIPTIONS["precio_excedentes"],
                     key="precio_excedentes_desktop"
                 )
 
@@ -595,7 +875,8 @@ def render_desktop_interface():
             for error in errores_validacion:
                 st.error(f"• {error}")
         else:
-            with st.spinner('Realizando cálculos y creando archivos... ⏳'):
+            with st.status("Generando propuesta...", expanded=True) as status:
+                status.update(label="📊 Calculando dimensionamiento y análisis financiero...", state="running")
                 nombre_proyecto = f"FV{str(datetime.datetime.now().year)[-2:]}{numero_proyecto_del_año:03d} - {nombre_cliente}" + (f" - {ubicacion}" if ubicacion else "")
                 
                 valor_proyecto_total, size_calc, monto_a_financiar, cuota_mensual_credito, \
@@ -703,9 +984,51 @@ def render_desktop_interface():
                         custom_params=custom_params
                     )
 
+                # Comparación de tamaños de sistema
+                comparacion_tamanos = None
+                if incluir_comparacion_tamanos:
+                    comparacion_tamanos = {}
+                    escalas = [('Económico (80%)', 0.8), ('Recomendado (100%)', 1.0), ('Premium (120%)', 1.2)]
+                    
+                    for nombre_escala, factor in escalas:
+                        size_escala = round(size * factor, 2)
+                        quantity_escala = redondear_a_par(size_escala * 1000 / module)
+                        size_escala = round(quantity_escala * module / 1000, 2)
+                        
+                        try:
+                            val_proy, size_c, _, _, desemb, fcl_c, _, monthly_gen, vpn_c, tir_c, \
+                            qty_c, _, inv_rec, _, _, _, pot_ac, ahorro_c, area_c, _, _ = \
+                                cotizacion(Load, size_escala, quantity_escala, cubierta, clima, 
+                                          index_input / 100, dRate_input / 100, costkWh, module,
+                                          ciudad=ciudad_para_calculo, hsp_lista=hsp_a_usar,
+                                          perc_financiamiento=0, horizonte_tiempo=horizonte_tiempo,
+                                          incluir_carbon=False, custom_params=custom_params)
+                            
+                            # Calculate payback
+                            cumsum_fcl = np.cumsum(fcl_c)
+                            pb = next((i for i, x in enumerate(cumsum_fcl) if x >= 0), None)
+                            
+                            gen_anual = sum(monthly_gen) if monthly_gen else 0
+                            cobertura = (gen_anual / (Load * 12) * 100) if Load > 0 else 0
+                            
+                            comparacion_tamanos[nombre_escala] = {
+                                'size_kwp': size_escala,
+                                'paneles': quantity_escala,
+                                'valor': val_proy,
+                                'tir': tir_c,
+                                'payback': pb,
+                                'ahorro_ano1': ahorro_c,
+                                'generacion_anual': gen_anual,
+                                'cobertura': min(cobertura, 100),
+                                'inversor': inv_rec
+                            }
+                        except Exception as e:
+                            comparacion_tamanos[nombre_escala] = {'error': str(e)}
+
                 # Lista de Materiales
                 lista_materiales = calcular_lista_materiales(cantidad_calc, cubierta, module, recomendacion_inversor)
 
+                status.update(label="📈 Generando gráficas...", state="running")
                 # --- GENERAR GRÁFICA PARA PDF ---
                 generar_grafica_generacion(monthly_generation, Load, incluir_baterias)
 
@@ -738,6 +1061,14 @@ def render_desktop_interface():
                     arboles_equivalentes_desktop = carbon_data.get('trees_saved_per_year', 0)
                     co2_evitado_tons_desktop = carbon_data.get('annual_co2_avoided_tons', 0.0)
                 
+                # Construir referencia del inversor (con marca/modelo si está especificado)
+                referencia_inversor_pdf = recomendacion_inversor
+                if marca_inversor and marca_inversor != "Automático":
+                    if modelo_inversor:
+                        referencia_inversor_pdf = f"{marca_inversor} {modelo_inversor}"
+                    else:
+                        referencia_inversor_pdf = f"{marca_inversor} ({recomendacion_inversor})"
+                
                 datos_para_pdf = {
                     "Nombre del Proyecto": nombre_proyecto, "Cliente": nombre_cliente,
                     "Valor Total del Proyecto (COP)": f"${valor_pdf_redondeado:,.0f}",
@@ -746,6 +1077,7 @@ def render_desktop_interface():
                     "Tamano del Sistema (kWp)": f"{size:.1f}",
                     "Cantidad de Paneles": f"{int(quantity)} de {int(module)}W","Área Requerida Aprox. (m²)": f"{area_requerida}",
                     "Inversor Recomendado": f"{recomendacion_inversor}",
+                    "Referencia Inversor": referencia_inversor_pdf,
                     "Generacion Promedio Mensual (kWh)": f"{generacion_promedio_mensual:,.1f}",
                     "Ahorro Estimado Primer Ano (COP)": f"{ahorro_año1:,.2f}",
                     "TIR (Tasa Interna de Retorno)": f"{tasa_interna:.1%}",
@@ -792,6 +1124,7 @@ def render_desktop_interface():
                 datos_para_contrato = datos_para_pdf.copy()
                 datos_para_contrato['Fecha de la Propuesta'] = fecha_propuesta
 
+                status.update(label="📄 Generando PDF de propuesta...", state="running")
                 pdf = PropuestaPDF(
                     client_name=nombre_cliente, 
                     project_name=nombre_proyecto,
@@ -800,19 +1133,22 @@ def render_desktop_interface():
                     fecha=fecha_propuesta 
                 )
 
-                pdf_bytes = pdf.generar(datos_para_pdf, usa_financiamiento, lat, lon)
+                pdf_bytes = pdf.generar(datos_para_pdf, usa_financiamiento, lat, lon, incluir_smartmeter=incluir_smartmeter)
                 nombre_pdf_final = f"{nombre_proyecto}.pdf"
                 
+                status.update(label="📝 Generando contrato...", state="running")
                 nombre_contrato_final = f"Contrato - {nombre_proyecto}.docx"
                 contrato_bytes = generar_contrato_docx(datos_para_contrato)
 
                 link_carpeta = None
                 if drive_service:
+                    status.update(label="☁️ Subiendo archivos a Google Drive...", state="running")
                     link_carpeta = gestionar_creacion_drive(
                         drive_service, parent_folder_id, nombre_proyecto, pdf_bytes, nombre_pdf_final,contrato_bytes, nombre_contrato_final
                     )
 
                 # CSV
+                status.update(label="📊 Generando archivo de flujo de caja...", state="running")
                 csv_content = None
                 nombre_csv = f"Flujo_Caja_Detallado_{nombre_proyecto}.csv"
                 try:
@@ -838,6 +1174,7 @@ def render_desktop_interface():
                     st.warning(f"No se pudo generar el CSV: {csv_error}")
 
                 # Notion
+                status.update(label="📋 Registrando en Notion CRM...", state="running")
                 agregado_notion, msg_notion = agregar_cliente_a_notion_crm(
                     nombre=nombre_cliente,
                     documento=documento_cliente,
@@ -858,6 +1195,7 @@ def render_desktop_interface():
                     'ahorro_año1': ahorro_año1,
                     'carbon_data': carbon_data,
                     'analisis_sensibilidad': analisis_sensibilidad,
+                    'comparacion_tamanos': comparacion_tamanos,
                     'lista_materiales': lista_materiales,
                     'pdf_bytes': pdf_bytes,
                     'nombre_pdf_final': nombre_pdf_final,
@@ -890,8 +1228,55 @@ def render_desktop_interface():
                     'module': module,
                     'cubierta': cubierta,
                     'lat': lat,
-                    'lon': lon
+                    'lon': lon,
+                    'marca_inversor': marca_inversor,
+                    'modelo_inversor': modelo_inversor,
+                    'incluir_smartmeter': incluir_smartmeter,
+                    # Datos adicionales para historial/duplicar
+                    'nombre_cliente': nombre_cliente,
+                    'documento_cliente': documento_cliente,
+                    'direccion_proyecto': direccion_proyecto,
+                    'fecha_propuesta': fecha_propuesta,
+                    'clima': clima,
+                    'costkWh': costkWh,
+                    'index_input': index_input,
+                    'dRate_input': dRate_input,
                 }
+                
+                # === GUARDAR EN HISTORIAL ===
+                cotizacion_historial = {
+                    'id': datetime.datetime.now().strftime('%Y%m%d%H%M%S'),
+                    'fecha': datetime.datetime.now().strftime('%d/%m/%Y %H:%M'),
+                    'nombre_proyecto': nombre_proyecto,
+                    'nombre_cliente': nombre_cliente,
+                    'size': size,
+                    'quantity': int(quantity),
+                    'module': module,
+                    'val_total': val_total,
+                    'tir': tasa_interna,
+                    'payback': payback_exacto,
+                    'Load': Load,
+                    'cubierta': cubierta,
+                    'clima': clima,
+                    'costkWh': costkWh,
+                    'index_input': index_input,
+                    'dRate_input': dRate_input,
+                    'horizonte_tiempo': horizonte_tiempo,
+                    'documento_cliente': documento_cliente,
+                    'direccion_proyecto': direccion_proyecto,
+                    'lat': lat,
+                    'lon': lon,
+                    'marca_inversor': marca_inversor,
+                    'modelo_inversor': modelo_inversor,
+                    'incluir_smartmeter': incluir_smartmeter,
+                }
+                
+                # Agregar al inicio del historial y mantener máximo 10
+                st.session_state.historial_cotizaciones.insert(0, cotizacion_historial)
+                if len(st.session_state.historial_cotizaciones) > 10:
+                    st.session_state.historial_cotizaciones = st.session_state.historial_cotizaciones[:10]
+                
+                status.update(label="✅ ¡Propuesta generada exitosamente!", state="complete", expanded=False)
                 st.rerun()
 
     # --- RENDERIZADO DE RESULTADOS ---
@@ -899,6 +1284,31 @@ def render_desktop_interface():
         res = st.session_state.desktop_results
         
         st.success(f"Proyecto Generado: {res['nombre_proyecto']}")
+        
+        # === BOTONES DE ACCIÓN RÁPIDA ===
+        col_action1, col_action2, col_action3 = st.columns([1, 1, 2])
+        with col_action1:
+            if st.button("➕ Nueva Cotización", use_container_width=True, type="primary"):
+                # Limpiar resultados para empezar de nuevo
+                st.session_state.desktop_results = None
+                st.rerun()
+        with col_action2:
+            if st.button("🔄 Duplicar y Ajustar", use_container_width=True):
+                # Guardar datos para duplicar en el próximo ciclo
+                st.session_state.duplicar_datos = {
+                    'nombre_cliente': res.get('nombre_cliente', '') + " (copia)",
+                    'documento_cliente': res.get('documento_cliente', ''),
+                    'direccion_proyecto': res.get('direccion_proyecto', ''),
+                    'Load': res.get('Load', 700),
+                    'costkWh': res.get('costkWh', 850),
+                    'index_input': res.get('index_input', 5.0),
+                    'dRate_input': res.get('dRate_input', 10.0),
+                    'horizonte_tiempo': res.get('horizonte_tiempo', 25),
+                    'lat': res.get('lat'),
+                    'lon': res.get('lon'),
+                }
+                st.session_state.desktop_results = None
+                st.rerun()
         
         if res['precio_manual'] and res['precio_manual_valor']:
              st.success(f"✅ **Precio Manual Aplicado**: ${res['val_total']:,.0f} COP")
@@ -915,6 +1325,15 @@ def render_desktop_interface():
             col4.metric("Batería Recomendada", f"{res['capacidad_nominal_bateria']:.1f} kWh")
         else:
             col4.metric("Ahorro Año 1", f"${res['ahorro_año1']:,.0f}")
+
+        # Inverter brand info
+        if res.get('marca_inversor') and res['marca_inversor'] != "Automático":
+            inversor_display = f"{res['marca_inversor']}"
+            if res.get('modelo_inversor'):
+                inversor_display += f" - {res['modelo_inversor']}"
+            st.info(f"🔌 **Marca de Inversor**: {inversor_display} | **Configuración recomendada**: {res['recomendacion_inversor']}")
+        else:
+            st.info(f"🔌 **Inversor recomendado**: {res['recomendacion_inversor']}")
 
         # Carbono
         if incluir_carbon and res['carbon_data'] and 'annual_co2_avoided_tons' in res['carbon_data']:
@@ -948,6 +1367,56 @@ def render_desktop_interface():
                     "Cuota Mensual": f"${datos['cuota_mensual']:,.0f}" if datos['cuota_mensual'] > 0 else "N/A"
                 })
             st.dataframe(pd.DataFrame(datos_tabla), use_container_width=True)
+
+        # Comparación de Tamaños de Sistema
+        if res.get('comparacion_tamanos'):
+            st.header("🔄 Comparación de Tamaños de Sistema")
+            st.info("📊 **Compara diferentes opciones** para encontrar el tamaño ideal para tu cliente")
+            
+            # Crear tabla de comparación
+            comp_data = []
+            for nombre, datos in res['comparacion_tamanos'].items():
+                if 'error' not in datos:
+                    comp_data.append({
+                        "Opción": nombre,
+                        "Tamaño (kWp)": f"{datos['size_kwp']:.1f}",
+                        "Paneles": int(datos['paneles']),
+                        "Inversión (COP)": f"${datos['valor']:,.0f}",
+                        "TIR": f"{datos['tir']:.1%}" if datos['tir'] else "N/A",
+                        "Payback (años)": f"{datos['payback']}" if datos['payback'] else "N/A",
+                        "Ahorro Año 1": f"${datos['ahorro_ano1']:,.0f}",
+                        "Cobertura": f"{datos['cobertura']:.0f}%",
+                    })
+            
+            if comp_data:
+                df_comp = pd.DataFrame(comp_data)
+                
+                # Highlight the recommended option with brand color
+                def highlight_recommended(row):
+                    if 'Recomendado' in row['Opción']:
+                        return ['background-color: #FA323F; color: white; font-weight: bold'] * len(row)
+                    return [''] * len(row)
+                
+                st.dataframe(
+                    df_comp.style.apply(highlight_recommended, axis=1),
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Visual comparison with metrics
+                st.subheader("📈 Resumen Visual")
+                cols = st.columns(len(comp_data))
+                for i, (col, datos) in enumerate(zip(cols, res['comparacion_tamanos'].values())):
+                    if 'error' not in datos:
+                        with col:
+                            nombre = list(res['comparacion_tamanos'].keys())[i]
+                            if 'Recomendado' in nombre:
+                                st.success(f"**{nombre}**")
+                            else:
+                                st.info(f"**{nombre}**")
+                            st.metric("Inversión", f"${datos['valor']:,.0f}")
+                            st.metric("TIR", f"{datos['tir']:.1%}" if datos['tir'] else "N/A")
+                            st.metric("Cobertura", f"{datos['cobertura']:.0f}%")
 
         # Presupuesto Guía
         with st.expander("📊 Ver Análisis Financiero Interno (Presupuesto Guía)"):
@@ -996,7 +1465,29 @@ def render_desktop_interface():
         ax2.set_title("Flujo de Caja Acumulado y Período de Retorno", fontweight="bold"); ax2.legend()
         st.pyplot(fig2)
 
+        # Vista Previa del PDF
+        st.subheader("👁️ Vista Previa de la Propuesta")
+        with st.expander("Ver PDF de la propuesta", expanded=False):
+            try:
+                from streamlit_pdf_viewer import pdf_viewer
+                pdf_viewer(res['pdf_bytes'], width=700, height=800)
+            except ImportError:
+                # Fallback si no está instalado streamlit-pdf-viewer
+                pdf_base64 = base64.b64encode(res['pdf_bytes']).decode('utf-8')
+                pdf_display = f'''
+                <embed 
+                    src="data:application/pdf;base64,{pdf_base64}" 
+                    width="100%" 
+                    height="600px" 
+                    type="application/pdf"
+                    style="border: 1px solid #333; border-radius: 5px;">
+                </embed>
+                '''
+                st.markdown(pdf_display, unsafe_allow_html=True)
+                st.caption("💡 Instala `streamlit-pdf-viewer` para mejor visualización: `pip install streamlit-pdf-viewer`")
+        
         # Descargas y Links
+        st.subheader("📁 Descargas y Enlaces")
         if res['link_carpeta']:
             st.info(f"➡️ [Abrir carpeta del proyecto en Google Drive]({res['link_carpeta']})")
         
@@ -1007,6 +1498,50 @@ def render_desktop_interface():
 
         if res['csv_content']:
             st.download_button("📊 Descargar Flujo de Caja en CSV (Detallado)", data=res['csv_content'], file_name=res['nombre_csv'], mime="text/csv", use_container_width=True)
+
+        # Excel Export
+        try:
+            hsp_promedio = sum(res['hsp_mensual_final']) / len(res['hsp_mensual_final']) if res['hsp_mensual_final'] else 0
+            datos_excel = {
+                'cliente': res.get('nombre_proyecto', '').split(' - ')[1] if ' - ' in res.get('nombre_proyecto', '') else '',
+                'proyecto': res.get('nombre_proyecto', ''),
+                'fecha': datetime.date.today().strftime('%Y-%m-%d'),
+                'tamano_kwp': res.get('size', 0),
+                'cantidad_paneles': res.get('quantity', 0),
+                'inversor': res.get('recomendacion_inversor', ''),
+                'valor_proyecto': res.get('val_total', 0),
+                'tir': res.get('tasa_interna', 0),
+                'vpn': res.get('valor_presente', 0),
+                'payback': res.get('payback_exacto', 'N/A'),
+                'ahorro_ano1': res.get('ahorro_año1', 0),
+                'generacion_anual': sum(res.get('monthly_generation', [])) if res.get('monthly_generation') else 0,
+                'consumo_mensual': res.get('Load', 0),
+                'costo_kwh': st.session_state.get('form_costo_kwh', 850),
+                'indexacion': st.session_state.get('form_indexacion', 5.0),
+                'tasa_descuento': st.session_state.get('form_tasa_descuento', 10.0),
+                'cubierta': res.get('cubierta', ''),
+                'clima': 'N/A',
+                'hsp_promedio': hsp_promedio,
+            }
+            
+            excel_bytes = generar_excel_financiero(
+                datos_proyecto=datos_excel,
+                flujo_caja=res.get('fcl', []),
+                monthly_generation=res.get('monthly_generation', []),
+                horizonte=res.get('horizonte_tiempo', 25),
+                analisis_sensibilidad=res.get('analisis_sensibilidad')
+            )
+            
+            nombre_excel = f"Análisis_Financiero_{res.get('nombre_proyecto', 'Proyecto')}.xlsx"
+            st.download_button(
+                "📈 Descargar Análisis en Excel (con gráficos)", 
+                data=excel_bytes, 
+                file_name=nombre_excel, 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                use_container_width=True
+            )
+        except Exception as excel_error:
+            st.warning(f"No se pudo generar el Excel: {excel_error}")
 
         if res['agregado_notion']:
             st.info("🗂️ Cliente agregado a Notion: En conversaciones")

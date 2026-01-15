@@ -52,17 +52,8 @@ def main():
         initial_sidebar_state="collapsed"
     )
     
-    # Mensaje de bienvenida y instrucciones
+    # Inicializar first_load
     if 'first_load' not in st.session_state:
-        st.success("🚀 **Calculadora Solar Cargada Correctamente**")
-        st.info("""
-        **Para cambiar entre modo móvil y desktop:**
-        1. 📱 **Abre el sidebar** (menú lateral)
-        2. 🔘 **Usa los botones** para cambiar entre modos
-        3. 🔄 **Cambio instantáneo** sin recargas
-        
-        **Modo actual:** Desktop (por defecto)
-        """)
         st.session_state.first_load = True
     
     # Inicializar session_state si no existe

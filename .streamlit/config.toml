@@ -1,0 +1,17 @@
+[theme]
+# Usar el tema del sistema (light/dark automático)
+base = "dark"
+
+# Colores de la marca MIRAC
+primaryColor = "#FA323F"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FAFAFA"
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

@@ -5,6 +5,7 @@ from fpdf import FPDF
 import datetime
 import os
 import math
+import re
 import streamlit as st
 
 class PropuestaPDF(FPDF):
@@ -187,6 +188,17 @@ class PropuestaPDF(FPDF):
         self.set_font('Roboto', 'B', 15)
         self.cell(w=0, txt=" kWh", align='L')
     
+    def crear_pagina_smartmeter(self):
+        """Página de Smart Meter (medidor inteligente)."""
+        self.add_page()
+        if os.path.exists('assets/smartmeter.jpg'):
+            self.image('assets/smartmeter.jpg', x=0, y=0, w=210)
+        else:
+            # Fallback si no existe la imagen
+            self.set_font(self.font_family, 'B', 24)
+            self.set_xy(20, 100)
+            self.cell(0, 10, "Smart Meter", align='C')
+    
     def crear_pagina_ubicacion(self, lat, lon):
         self.add_page()
         self.image('assets/6.jpg', x=0, y=0, w=210)
@@ -240,9 +252,24 @@ class PropuestaPDF(FPDF):
         self.set_xy(x_inicio, 126)
         self.cell(w=ancho_total, txt=f"{datos.get('Tamano del Sistema (kWp)', 'X.X')} kWp", align='R')
         
-        # Referencia inversores
+        # Cantidad de inversores (extraer del formato "2x10kW" o "1x50kW + 1x30kW")
+        inversor_recomendado = datos.get('Inversor Recomendado', 'N/A')
+        cantidad_inversores = 0
+        if inversor_recomendado and inversor_recomendado != 'N/A':
+            # Buscar todos los patrones "NxXXkW" y sumar las cantidades
+            matches = re.findall(r'(\d+)x\d+kW', inversor_recomendado)
+            cantidad_inversores = sum(int(m) for m in matches) if matches else 1
+        
         self.set_xy(x_inicio, 135)
-        self.cell(w=ancho_total, txt=datos.get('Inversor Recomendado', 'N/A'), align='R')
+        self.cell(w=ancho_total, txt=str(cantidad_inversores) if cantidad_inversores > 0 else "N/A", align='R')
+        
+        # Referencia inversores (incluye marca si está especificada)
+        referencia_inversor = datos.get('Referencia Inversor', '')
+        if not referencia_inversor:
+            referencia_inversor = inversor_recomendado
+        
+        self.set_xy(x_inicio, 144)
+        self.cell(w=ancho_total, txt=referencia_inversor, align='R')
 
         # Potencia total en AC
         self.set_xy(x_inicio, 153)
@@ -461,7 +488,7 @@ class PropuestaPDF(FPDF):
         self.set_xy(19,214)
         self.cell(w=50, txt=str(vida_util), align='C')
 
-    def generar(self, datos_calculadora, usa_financiamiento, lat=None, lon=None):
+    def generar(self, datos_calculadora, usa_financiamiento, lat=None, lon=None, incluir_smartmeter=False):
         """
         Llama a todos los métodos en orden para construir el documento.
         
@@ -470,21 +497,27 @@ class PropuestaPDF(FPDF):
         2. Resumen Ejecutivo (kWp, módulos, árboles, CO2)
         3. Generación Mensual
         4. Ubicación
-        5. Ficha Técnica
-        6. Alcance
-        7. Términos/Costos
-        8. Info Financiera (TIR, ahorro, O&M, deducible)
-        9. Financiación (si aplica)
-        10. Aspectos A
-        11. Aspectos B
-        12. Proyectos
-        13. Contacto
+        5. Smart Meter (si aplica)
+        6. Ficha Técnica
+        7. Alcance
+        8. Términos/Costos
+        9. Info Financiera (TIR, ahorro, O&M, deducible)
+        10. Financiación (si aplica)
+        11. Aspectos A
+        12. Aspectos B
+        13. Proyectos
+        14. Contacto
         """
         self.crear_portada()
         self.crear_resumen_ejecutivo(datos_calculadora)
         self.crear_pagina_generacion_mensual(datos_calculadora)
         if lat is not None and lon is not None:
             self.crear_pagina_ubicacion(lat, lon)
+        
+        # Página de Smart Meter (después de ubicación)
+        if incluir_smartmeter:
+            self.crear_pagina_smartmeter()
+        
         self.crear_pagina_tecnica(datos_calculadora)
         self.crear_pagina_alcance()
         self.crear_pagina_terminos(datos_calculadora)

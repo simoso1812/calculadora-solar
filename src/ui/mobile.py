@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 
 from src.config import HSP_MENSUAL_POR_CIUDAD, PROMEDIOS_COSTO, ESTRUCTURA_CARPETAS, HSP_POR_CIUDAD
 from src.config_parametros import DEFAULT_PARAMS, PARAM_DESCRIPTIONS, get_param
-from src.services.pvgis_service import get_pvgis_hsp_alternative
+from src.services.pvgis_service import get_pvgis_hsp_alternative, get_data_source_label, DATA_SOURCE_PVGIS
 from src.services.calculator_service import (
     calcular_costo_por_kwp,
     cotizacion, 
@@ -33,26 +33,28 @@ try:
 except ImportError:
     carbon_calculator = None
 
+def init_mobile_form_defaults():
+    """Initialize session state with default form values for mobile"""
+    defaults = {
+        'nombre_mobile': '',
+        'doc_mobile': '',
+        'dir_mobile': '',
+        'consumo_mobile': 700,
+        'pot_panel_mobile': 615,
+        'cubierta_mobile': 'LÁMINA',
+        'clima_mobile': 'SOL',
+        'costo_kwh_mobile': 850,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
 def render_mobile_interface():
     """Interfaz optimizada para móviles"""
-    # Debug visual - confirmar que estamos en modo móvil
-    st.markdown("""
-    <div style="background: #ff6b6b; color: white; padding: 20px; border-radius: 15px; text-align: center; margin: 20px 0; border: 3px solid #ff4757;">
-        <h1 style="margin: 0; color: white;">📱 MODO MÓVIL ACTIVADO 📱</h1>
-        <p style="margin: 10px 0; font-size: 18px;">Interfaz optimizada para dispositivos móviles</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Header móvil con indicador claro
-    col1, col2, col3 = st.columns([1, 3, 1])
-    with col1:
-        st.markdown("📱")
-    with col2:
-        st.title("☀️ Calculadora Solar")
-    with col3:
-        st.markdown("📱")
-    
-    st.success("✅ Interfaz móvil cargada correctamente")
+    st.title("☀️ Calculadora Solar")
+
+    # Initialize form defaults for persistence
+    init_mobile_form_defaults()
 
     # Inicializar estado de resultados si no existe
     if 'mobile_results' not in st.session_state:
@@ -124,6 +126,61 @@ def render_tab_ubicacion_mobile():
     else:
         st.info("Configura la variable Maps_API_KEY para habilitar la búsqueda de direcciones.")
     
+    # === BOTÓN USAR MI UBICACIÓN ===
+    col_geo1, col_geo2 = st.columns([1, 1])
+    with col_geo1:
+        if st.button("📍 Usar mi ubicación", key="use_my_location_mobile", use_container_width=True):
+            st.session_state.requesting_location = True
+    
+    # JavaScript para obtener geolocalización
+    if st.session_state.get('requesting_location', False):
+        import streamlit.components.v1 as components
+        geolocation_js = """
+        <script>
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    const lat = position.coords.latitude;
+                    const lng = position.coords.longitude;
+                    // Enviar coordenadas a Streamlit via query params
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        value: {lat: lat, lng: lng}
+                    }, '*');
+                    // Alternativa: usar localStorage
+                    localStorage.setItem('user_lat', lat);
+                    localStorage.setItem('user_lng', lng);
+                    // Mostrar alerta con coordenadas para copiar manualmente si es necesario
+                    alert('Ubicación obtenida: ' + lat.toFixed(6) + ', ' + lng.toFixed(6) + '\\n\\nSi el mapa no se actualiza automáticamente, ingresa estas coordenadas manualmente.');
+                },
+                function(error) {
+                    alert('Error obteniendo ubicación: ' + error.message + '\\n\\nAsegúrate de permitir el acceso a la ubicación.');
+                },
+                {enableHighAccuracy: true, timeout: 10000}
+            );
+        } else {
+            alert('Tu navegador no soporta geolocalización');
+        }
+        </script>
+        <p style="color: #888; font-size: 12px;">🔄 Solicitando ubicación... Permite el acceso cuando el navegador lo pida.</p>
+        """
+        components.html(geolocation_js, height=50)
+        st.session_state.requesting_location = False
+    
+    # Input manual de coordenadas como alternativa
+    with col_geo2:
+        with st.popover("📝 Ingresar coordenadas"):
+            st.caption("Ingresa las coordenadas manualmente:")
+            manual_lat = st.number_input("Latitud", value=6.2, min_value=-90.0, max_value=90.0, format="%.6f", key="manual_lat_mobile")
+            manual_lng = st.number_input("Longitud", value=-75.5, min_value=-180.0, max_value=180.0, format="%.6f", key="manual_lng_mobile")
+            if st.button("✅ Aplicar", key="apply_manual_coords_mobile"):
+                st.session_state.map_state = st.session_state.get('map_state', {"center":[4.5709,-74.2973],"zoom":6,"marker":None})
+                st.session_state.map_state["marker"] = [manual_lat, manual_lng]
+                st.session_state.map_state["center"] = [manual_lat, manual_lng]
+                st.session_state.map_state["zoom"] = 16
+                st.rerun()
+    
+    # Búsqueda por dirección
     address = st.text_input("Buscar dirección o lugar:", placeholder="Ej: Cl. 77 Sur #40-168, Sabaneta", key="address_search_mobile")
     address = address.strip()
     if st.button("🔎 Buscar Dirección", key="buscar_dir_mobile"):
@@ -154,7 +211,28 @@ def render_tab_ubicacion_mobile():
     if "map_state" not in st.session_state:
         st.session_state.map_state = {"center":[4.5709,-74.2973],"zoom":6,"marker":None}
     
-    m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
+    # === TOGGLE VISTA SATÉLITE ===
+    vista_satelite = st.toggle("🛰️ Vista Satélite", key="satellite_view_mobile")
+    
+    # Crear mapa con tiles según selección
+    if vista_satelite:
+        # Usar tiles de satélite de Esri
+        m = folium.Map(
+            location=st.session_state.map_state["center"], 
+            zoom_start=st.session_state.map_state["zoom"],
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attr='Esri World Imagery'
+        )
+        # Agregar capa de etiquetas sobre el satélite
+        folium.TileLayer(
+            tiles='https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+            attr='Esri Labels',
+            overlay=True,
+            name='Etiquetas'
+        ).add_to(m)
+    else:
+        m = folium.Map(location=st.session_state.map_state["center"], zoom_start=st.session_state.map_state["zoom"])
+    
     if st.session_state.map_state["marker"]:
         folium.Marker(location=st.session_state.map_state["marker"], popup="Ubicación", icon=folium.Icon(color="red")).add_to(m)
     
@@ -178,6 +256,14 @@ def render_tab_ubicacion_mobile():
         hsp_mensual_calculado = st.session_state.pvgis_data
         if hsp_mensual_calculado:
             prom = sum(hsp_mensual_calculado)/len(hsp_mensual_calculado)
+            
+            # Show data source clearly
+            data_source = get_data_source_label()
+            if st.session_state.get('hsp_data_source') == DATA_SOURCE_PVGIS:
+                st.success(f"✅ {data_source}")
+            else:
+                st.info(f"📊 {data_source}")
+            
             st.metric("Promedio Diario Anual (HSP)", f"{prom:.2f} kWh/m²")
             with st.expander("📊 HSP mensual"):
                 meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]

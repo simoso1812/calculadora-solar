@@ -7,9 +7,14 @@ import math
 import os
 import streamlit as st
 
-def get_pvgis_hsp_local(lat, lon):
+# Track data source for UI display
+DATA_SOURCE_PVGIS = "pvgis"
+DATA_SOURCE_ESTIMATED = "estimated"
+
+def get_pvgis_hsp_local(lat, lon, show_progress=True):
     """
     Versión optimizada para desarrollo local con PVGIS.
+    Returns tuple: (hsp_data, data_source, error_message)
     """
     try:
         api_url = 'https://re.jrc.ec.europa.eu/api/MRcalc'
@@ -28,32 +33,51 @@ def get_pvgis_hsp_local(lat, lon):
             'Connection': 'keep-alive'
         })
         
-        # Configuración más agresiva para local
-        max_retries = 2
-        timeout = 15
+        max_retries = 3
+        timeout = 20
         
         for attempt in range(max_retries):
             try:
+                if show_progress and attempt > 0:
+                    st.info(f"🔄 Reintentando conexión PVGIS... (intento {attempt + 1}/{max_retries})")
+                
                 response = session.get(api_url, params=params, timeout=timeout)
                 response.raise_for_status()
                 
                 if response.status_code == 200 and response.content:
                     data = response.json()
-                    return process_pvgis_data(data, lat, lon)
+                    hsp_data = process_pvgis_data(data, lat, lon, show_messages=False)
+                    if hsp_data:
+                        # Store source in session state
+                        st.session_state.hsp_data_source = DATA_SOURCE_PVGIS
+                        return hsp_data
+                    
+            except requests.exceptions.Timeout:
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                    
+            except requests.exceptions.ConnectionError:
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
                     
             except Exception as e:
-                if attempt == max_retries - 1:
-                    st.warning(f"PVGIS local falló: {e}")
-                    return get_hsp_estimado_mejorado(lat, lon)
-                time.sleep(1)
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
         
-        return get_hsp_estimado_mejorado(lat, lon)
+        # All retries failed - use estimation
+        st.warning("⚠️ No se pudo conectar con PVGIS (base de datos satelital). Usando datos estimados por región geográfica.")
+        st.session_state.hsp_data_source = DATA_SOURCE_ESTIMATED
+        return get_hsp_estimado_mejorado(lat, lon, show_messages=False)
         
     except Exception as e:
-        st.warning(f"Error en PVGIS local: {e}")
-        return get_hsp_estimado_mejorado(lat, lon)
+        st.warning(f"⚠️ Error consultando datos solares: {str(e)[:100]}. Usando estimación regional.")
+        st.session_state.hsp_data_source = DATA_SOURCE_ESTIMATED
+        return get_hsp_estimado_mejorado(lat, lon, show_messages=False)
 
-def get_hsp_estimado_mejorado(lat, lon):
+def get_hsp_estimado_mejorado(lat, lon, show_messages=True):
     """
     Genera estimaciones mejoradas de HSP basadas en datos climáticos globales.
     """
@@ -83,7 +107,12 @@ def get_hsp_estimado_mejorado(lat, lon):
         
         hsp_mensual.append(round(hsp_diario, 2))
     
-    st.success(f"✅ Datos HSP estimados para lat: {lat:.4f}, lon: {lon:.4f}")
+    # Store source in session state
+    st.session_state.hsp_data_source = DATA_SOURCE_ESTIMATED
+    
+    if show_messages:
+        st.info(f"📊 Datos HSP estimados para zona {region_data['region']} (lat: {lat:.4f}, lon: {lon:.4f})")
+    
     return hsp_mensual
 
 def get_climate_data_by_region(lat, lon):
@@ -161,7 +190,7 @@ def get_altitude_factor(lat, lon):
     else:
         return 1.0
 
-def process_pvgis_data(data, lat, lon):
+def process_pvgis_data(data, lat, lon, show_messages=True):
     """
     Procesa los datos de PVGIS cuando están disponibles.
     """
@@ -170,7 +199,7 @@ def process_pvgis_data(data, lat, lon):
         monthly_data = outputs.get('monthly', [])
 
         if not monthly_data:
-            return get_hsp_estimado_mejorado(lat, lon)
+            return get_hsp_estimado_mejorado(lat, lon, show_messages=show_messages)
         
         dias_por_mes = [31, 28.25, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
         hsp_mensual = []
@@ -222,12 +251,17 @@ def process_pvgis_data(data, lat, lon):
                 altitude_factor = get_altitude_factor(lat, lon)
                 hsp_mensual[i] = round((region_data['base_hsp'] + region_data['variation'] * seasonal_factor) * altitude_factor, 2)
         
-        st.success(f"✅ Datos HSP obtenidos de PVGIS para lat: {lat:.4f}, lon: {lon:.4f}")
+        # Store source in session state
+        st.session_state.hsp_data_source = DATA_SOURCE_PVGIS
+        
+        if show_messages:
+            st.success(f"✅ Datos HSP obtenidos de PVGIS (satélite) para lat: {lat:.4f}, lon: {lon:.4f}")
         return hsp_mensual
         
     except Exception as e:
-        st.warning(f"Error procesando datos PVGIS: {e}")
-        return get_hsp_estimado_mejorado(lat, lon)
+        if show_messages:
+            st.warning(f"⚠️ Error procesando datos PVGIS: {str(e)[:50]}. Usando estimación regional.")
+        return get_hsp_estimado_mejorado(lat, lon, show_messages=show_messages)
     
 def get_pvgis_hsp_alternative(lat, lon):
     """
@@ -237,25 +271,38 @@ def get_pvgis_hsp_alternative(lat, lon):
     try:
         # Validar coordenadas
         if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+            st.error("❌ Coordenadas inválidas. Por favor selecciona una ubicación válida en el mapa.")
             return None
         
         # Detectar entorno de producción
         is_production = os.getenv('RENDER') or os.getenv('HEROKU') or os.getenv('PORT')
         
         if is_production:
-            st.info("🌐 Modo producción: Usando datos estimados optimizados")
-            return get_hsp_estimado_mejorado(lat, lon)
+            # In production, use estimated data (more reliable)
+            st.session_state.hsp_data_source = DATA_SOURCE_ESTIMATED
+            return get_hsp_estimado_mejorado(lat, lon, show_messages=True)
         
         # En desarrollo local, intentar PVGIS con configuración más agresiva
-        return get_pvgis_hsp_local(lat, lon)
+        return get_pvgis_hsp_local(lat, lon, show_progress=True)
         
     except Exception as e:
-        st.warning(f"Error en función alternativa: {e}")
-        return get_hsp_estimado_mejorado(lat, lon)
+        st.warning(f"⚠️ Error obteniendo datos solares: {str(e)[:100]}. Usando estimación regional.")
+        st.session_state.hsp_data_source = DATA_SOURCE_ESTIMATED
+        return get_hsp_estimado_mejorado(lat, lon, show_messages=False)
 
 def get_hsp_estimado(lat, lon):
     """
     Genera estimaciones de HSP basadas en la latitud cuando PVGIS falla.
     Ahora usa la función mejorada.
     """
-    return get_hsp_estimado_mejorado(lat, lon)
+    return get_hsp_estimado_mejorado(lat, lon, show_messages=True)
+
+def get_data_source_label():
+    """
+    Returns a user-friendly label for the current HSP data source.
+    """
+    source = st.session_state.get('hsp_data_source', DATA_SOURCE_ESTIMATED)
+    if source == DATA_SOURCE_PVGIS:
+        return "🛰️ PVGIS (Datos Satelitales)"
+    else:
+        return "📊 Estimación Regional"
