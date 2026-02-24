@@ -360,7 +360,7 @@ class PropuestaPDF(FPDF):
         self.set_text_color(*self.TEXT_COLOR)
         # Ajustamos posición para caer justo donde debería ir el número en la plantilla
         # Asumiendo que el texto "Tiempo de retorno..." ya está impreso en la imagen
-        self.set_xy(153, 74) 
+        self.set_xy(153, 75) 
         self.cell(w=30, h=6, txt=f"{self._format_number(periodo_retorno, decimals=1)} años", align='R')
 
         # --- Base font setup for values ---
